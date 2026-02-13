@@ -1,0 +1,91 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card p-4">
+  <h5 class="mb-1">{{ o.title }}</h5>
+  <div class="text-secondary small">发布者：{{ elder.name }}</div>
+  <div class="text-secondary small">需求：{{ o.skills_required or '—' }}</div>
+  <div class="mt-2">{{ o.description }}</div>
+  <div class="mt-3">
+    <span class="status-badge status-{{ o.status }}">{{ {'open':'待接单','in_progress':'进行中','completed':'已完成','handover':'待接手'}[o.status] }}</span>
+  {% if w %}<span class="badge rounded-pill text-bg-primary ms-2">护工：{{ w.name }}</span>{% endif %}
+  </div>
+  {% if o.handover_notes %}
+  <div class="alert alert-warning mt-3">
+    <strong>交接备注：</strong>{{ o.handover_notes }}
+  </div>
+  {% endif %}
+</div>
+
+<div class="row g-3 mt-3">
+  <div class="col-md-4">
+    <div class="card p-3">
+      <div class="fw-semibold mb-2">责任保险</div>
+      <div class="small text-secondary">本订单支持商业责任险，理赔渠道透明。若需理赔请联系客服。</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3">
+      <div class="fw-semibold mb-2">交接记录</div>
+      <div class="small text-secondary">以下为交接摘要（占位）：</div>
+      <ul class="small text-secondary mt-2">
+        <li>2026-02-10 10:00：护工 A 完成早间护理</li>
+        <li>2026-02-11 18:20：护工 B 交接并补充用药记录</li>
+      </ul>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3">
+      <div class="fw-semibold mb-2">相关证书</div>
+      <div class="small text-secondary">护工证书与培训记录（占位图）：</div>
+      <div class="d-flex gap-2 mt-2">
+        <div class="badge bg-light text-dark">身份证</div>
+        <div class="badge bg-light text-dark">从业证</div>
+        <div class="badge bg-light text-dark">急救证</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 可视化区域：护理时长时序与护工时长占比 -->
+<div class="row g-3 mt-4">
+  <div class="col-md-8">
+    <div class="card p-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="fw-semibold">护理时长趋势（按日统计）</div>
+        <div class="small text-secondary">单位：分钟</div>
+      </div>
+      <div class="chart-wrap position-relative">
+        <canvas id="durationsChart" height="160" class="lazy-chart" data-order-id="{{ o.id }}"></canvas>
+        <div class="chart-overlay" id="durationsChart-overlay">加载中...</div>
+        <div class="chart-loader" id="durationsChart-loader"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3">
+      <div class="fw-semibold mb-2">护工时长占比</div>
+      <div class="chart-wrap position-relative">
+        <canvas id="workerShareChart" height="160" class="lazy-chart" data-order-id="{{ o.id }}"></canvas>
+        <div class="chart-overlay d-none" id="workerShareChart-overlay">暂无数据</div>
+        <div class="chart-loader d-none" id="workerShareChart-loader"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.ORDER_PAYLOAD = { orderId: {{ o.id }} };
+  (function(){
+    const toLoad = document.querySelectorAll('.lazy-chart');
+    if(!toLoad.length) return;
+    const loadOnce = ()=>{
+      if(window.__analytics_loaded) return; window.__analytics_loaded = true;
+      const s = document.createElement('script'); s.src = '/static/js/analytics.js'; s.defer = true; document.body.appendChild(s);
+    };
+    const obs = new IntersectionObserver((entries)=>{
+      for(const e of entries){ if(e.isIntersecting){ loadOnce(); obs.disconnect(); break; } }
+    }, {rootMargin: '200px'});
+    toLoad.forEach(n=>obs.observe(n));
+  })();
+</script>
+{% endblock %}

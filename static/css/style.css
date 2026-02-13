@@ -1,53 +1,113 @@
-:root{ --primary:#1e6fff; --primary-600:#135ef0; --accent:#ff7a59; --safe-green:#2fa66a; --light:#f6f9ff; --card:#ffffff; }
-body{ background:#0f1226; color:#e6eefb; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-.navbar{ background:linear-gradient(90deg,#0b1228,#0f1b3a); box-shadow:0 8px 32px rgba(2,8,23,.6); }
-.btn-primary{ --bs-btn-bg:var(--primary); --bs-btn-border-color:var(--primary); --bs-btn-hover-bg:var(--primary-600); --bs-btn-hover-border-color:var(--primary-600); }
-.hero{ background: linear-gradient(135deg, #6a8dff 0%, #5fd2ff 100%); border-radius: 24px; color:#fff; padding:42px 28px; box-shadow:0 30px 60px rgba(30,111,255,.18); }
-.card{ border:0; border-radius:18px; background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02)); box-shadow:0 10px 40px rgba(2,8,23,.5); transition: transform 0.18s, box-shadow 0.18s; }
-.card:hover{ transform: translateY(-6px); box-shadow:0 20px 60px rgba(30,111,255,.16); }
-.badge-soft{ background:rgba(255,255,255,0.04); color:#9ec5ff; border:1px solid rgba(255,255,255,0.03); }
-.stat-card .value{ font-weight:700; color:#1e6fff; }
-.section-title{ font-weight:700; color:#dfeaff; margin-bottom:1.5rem; }
-.feature i{ font-size:28px; color:#9ec5ff; }
-.list-dot li{ margin:6px 0; padding-left:1rem; position:relative; }
-.list-dot li:before{ content:"•"; position:absolute; left:0; color:#9ec5ff; }
-footer{ color:#98a6c3; background:linear-gradient(90deg,#071028,#0b1530); border-top:1px solid rgba(255,255,255,0.03); }
+:root{
+	/* New palette: 温和蓝绿为主，暖色为强调 */
+	--brand: #0b8f8f;         /* 主色：青绿色 */
+	--brand-700: #0a7a7a;
+	--accent: #ff6b6b;        /* 强调色：暖珊瑚 */
+	--muted: #6c757d;
+	--bg: #f7faf9;            /* 页面背景 */
+	--surface: #ffffff;       /* 卡片背景 */
+	--card-shadow: rgba(11,31,30,0.06);
+	--success: #2fa66a;
+	--danger: #d9534f;
+}
+html,body{height:100%;}
+body{
+	background:var(--bg);
+	color:#212529;
+	font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+	-webkit-font-smoothing:antialiased;
+	-moz-osx-font-smoothing:grayscale;
+}
 
-/* 安全保障样式增强 */
-.safety-hero{ background: linear-gradient(90deg, rgba(46,194,144,0.12), rgba(30,111,255,0.06)); border-radius:14px; padding:18px; display:flex; gap:16px; align-items:center; margin-bottom:1rem; }
-.safety-badge{ display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; font-weight:600; }
-.safety-badge .bi{ font-size:1.25rem; }
-.safety-pill{ padding:6px 10px; border-radius:999px; font-weight:600; color:#fff; }
-.safety-pill.verify{ background: linear-gradient(90deg,#2fa66a,#1e9952); }
-.safety-pill.insure{ background: linear-gradient(90deg,#ff9f43,#ff7a59); }
-.safety-pill.trace{ background: linear-gradient(90deg,#3b82f6,#1e6fff); }
+/* Navbar */
+.navbar{background:var(--surface); box-shadow:0 1px 8px var(--card-shadow);}
+.navbar .navbar-brand{font-size:1.125rem; font-family: 'Merriweather', serif; color:var(--brand);}
 
-/* 小数据卡样式 */
-.stat-mini{ display:flex; gap:12px; align-items:center; padding:12px; border-radius:12px; background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); box-shadow:0 6px 24px rgba(2,8,23,.45); }
-.stat-mini .icon{ width:48px; height:48px; display:flex; align-items:center; justify-content:center; border-radius:10px; color:#fff; }
-.icon-verify{ background:linear-gradient(135deg,#2fa66a,#1e9952); }
-.icon-insure{ background:linear-gradient(135deg,#ff9f43,#ff7a59); }
-.icon-trace{ background:linear-gradient(135deg,#3b82f6,#1e6fff); }
-.stat-mini .meta{ font-size:0.95rem; color:#c9d8ff; }
-.stat-mini .value{ font-weight:700; font-size:1.1rem; color:#fff; }
+/* Hero */
+.hero{background:linear-gradient(180deg, rgba(13,110,253,0.06), transparent); border-radius:8px; padding:22px;}
+.hero h2{font-size:1.6rem}
 
-/* 图表卡与渐变色 */
-.chart-card{ border-radius:14px; padding:16px; background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); box-shadow:0 10px 30px rgba(2,8,23,.48); }
-.bg-gradient-primary{ background: linear-gradient(90deg,#6a8dff,#5fd2ff); color:#fff; }
-.bg-gradient-accent{ background: linear-gradient(90deg,#ff7a59,#ff9f43); color:#fff; }
-.stat-icon{ width:44px; height:44px; display:inline-flex; align-items:center; justify-content:center; border-radius:10px; color:#fff; }
-.stat-pill{ padding:6px 10px; border-radius:999px; font-weight:700; }
+/* Card tweaks */
+.card{border:0; background:var(--surface); box-shadow:0 6px 18px var(--card-shadow); border-radius:10px}
+.card p, .card .small{color:var(--muted)}
 
-/* 响应式小调整 */
-@media (max-width: 768px){ .hero{ padding:28px 18px; } .safety-hero{ flex-direction:column; align-items:flex-start; } }
+.section-title{font-weight:600; color:var(--muted)}
 
-/* 额外：表格与小按钮高对比 */
-.table thead th{ background: linear-gradient(90deg,#071028,#0b1530); color:#cfe6ff; }
-.btn-outline-primary{ color:#bfe0ff; border-color:rgba(255,255,255,0.06); }
+/* Status badges */
+.status-badge{display:inline-block; padding:6px 10px; border-radius:999px; font-size:.85rem}
+.status-open{background:#fff3cd; color:#9a6b00}
+.status-in_progress{background:#cff4fc; color:#055160}
+.status-completed{background:#d1e7dd; color:#0f5132}
+.status-handover{background:#f8d7da; color:#842029}
 
-/* 加载器与空数据覆盖层 */
-.chart-wrap{ position:relative; }
-.chart-overlay{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#99baf7; font-weight:700; font-size:1rem; background:linear-gradient(90deg, rgba(2,8,23,0.55), rgba(2,8,23,0.35)); border-radius:12px; }
-.chart-loader{ position:absolute; right:14px; top:14px; width:28px; height:28px; border-radius:999px; border:4px solid rgba(255,255,255,0.08); border-top-color:var(--primary); animation:spin 1s linear infinite; }
-@keyframes spin{ from{ transform:rotate(0deg);} to{ transform:rotate(360deg);} }
-.d-none{ display:none !important; }
+/* list and utilities */
+.list-dot{list-style:disc; padding-left:1rem}
+.badge-soft{background:rgba(11,143,143,0.06); padding:.35rem .5rem; border-radius:.5rem}
+
+/* Stat card */
+.stat-card .badge{font-weight:600}
+
+/* Charts */
+.chart-wrap{min-height:160px}
+.chart-overlay{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-weight:600; color:var(--muted); background:linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.4)); border-radius:6px}
+.chart-loader{position:absolute; right:12px; bottom:10px; width:28px; height:6px; background:linear-gradient(90deg,var(--brand), rgba(11,143,143,0.15)); border-radius:3px}
+
+/* Button overrides to align with brand */
+.btn-primary{
+	background-color: var(--brand) !important;
+	border-color: var(--brand) !important;
+}
+.btn-primary:hover{
+	background-color: var(--brand-700) !important;
+	border-color: var(--brand-700) !important;
+}
+
+/* Gradient utilities using variables */
+.bg-gradient-primary{ background: linear-gradient(90deg, var(--brand), rgba(11,143,143,0.75)); color:#fff; }
+.bg-gradient-accent{ background: linear-gradient(90deg, var(--accent), #ff9069); color:#fff; }
+
+/* Stat icon gradients */
+.stat-icon.bg-gradient-primary{ background: linear-gradient(135deg, var(--brand), #17b3b3); }
+.stat-icon.bg-gradient-accent{ background: linear-gradient(135deg, var(--accent), #ff8a6a); }
+
+/* Typography helpers */
+.fw-brand{color:var(--brand); font-family: 'Merriweather', serif}
+
+/* Responsive */
+@media (max-width:767px){
+	.hero{padding:16px}
+}
+
+/* Accordion tweaks for FAQ */
+.accordion-button:not(.collapsed){color:var(--brand); font-weight:600}
+
+.card{padding:18px}
+
+/* Slightly larger headings and comfortable line height */
+h1,h2,h3,h4,h5{line-height:1.15}
+h1{font-size:1.75rem}
+h2{font-size:1.5rem}
+
+/* Buttons & controls */
+.btn{border-radius:8px}
+.btn-sm{border-radius:6px}
+.form-control{border-radius:8px}
+
+.stat-mini{ display:flex; gap:12px; align-items:center; padding:12px; border-radius:12px; background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); box-shadow:0 6px 18px var(--card-shadow); }
+.stat-mini .icon{ width:48px; height:48px; display:flex; align-items:center; justify-content:center; border-radius:10px; color:#fff; font-size:1.25rem }
+.icon-verify{ background:linear-gradient(135deg,var(--brand),#17b3b3); }
+.icon-insure{ background:linear-gradient(135deg,var(--accent),#ff8a6a); }
+.icon-trace{ background:linear-gradient(135deg,var(--brand),#2fa66a); }
+.stat-mini .meta{ font-size:0.95rem; color:#556170 }
+.stat-mini .value{ font-weight:700; font-size:1.05rem; color:var(--brand) }
+
+.card:hover{ transform: translateY(-4px); box-shadow:0 18px 40px rgba(11,31,30,0.08); }
+
+.chart-overlay{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-weight:600; color:var(--muted); background:linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.4)); border-radius:6px}
+.chart-loader{position:absolute; right:12px; bottom:10px; width:28px; height:6px; background:linear-gradient(90deg,var(--brand), rgba(11,143,143,0.15)); border-radius:3px}
+
+/* small utility tweaks */
+.mb-2{margin-bottom:.5rem}
+.gap-2{gap:.5rem}
+
+.d-none{display:none !important}

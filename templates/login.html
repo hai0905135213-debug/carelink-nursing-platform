@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-5"><div class="card p-4">
+    <h5 class="text-primary mb-3">登录 护理智联</h5>
+    <form method="post">
+      <div class="mb-3"><label class="form-label">邮箱</label><input class="form-control" name="email" type="email" required></div>
+      <div class="mb-3"><label class="form-label">密码</label><input class="form-control" name="password" type="password" required></div>
+      <button class="btn btn-primary w-100">登录</button>
+    </form>
+    <div class="small mt-2 text-secondary">没有账号？<a href="{{ url_for('register') }}">注册</a></div>
+  </div></div>
+</div>
+{% endblock %}

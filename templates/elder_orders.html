@@ -1,0 +1,14 @@
+{% extends 'base.html' %}{% block content %}
+<h5 class='mb-3'>我的订单</h5>
+<div class='row g-3'>
+{% for o in orders %}
+  <div class='col-md-6'><div class='card p-3'>
+  <div class='fw-semibold'>{{ o.title }}</div>
+  <div class='small text-secondary'>状态：{{ status_label(o.status) }} · 护工：{{ o.worker_name or '—' }}</div>
+  <div class='mt-2'><a class='btn btn-sm btn-outline-primary' href='{{ url_for("order_detail", order_id=o.id) }}'>详情</a></div>
+  </div></div>
+{% else %}
+  <div class='text-secondary'>暂无订单</div>
+{% endfor %}
+</div>
+{% endblock %}

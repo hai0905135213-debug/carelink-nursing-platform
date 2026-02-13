@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7"><div class="card p-4">
+    <h5 class="text-primary mb-3">注册</h5>
+    <form method="post">
+      <div class="row g-3">
+        <div class="col-md-4"><label class="form-label">角色</label>
+          <select class="form-select" name="role" id="roleSelect">
+            <option value="worker">护工</option><option value="elder">老人</option><option value="family">家属</option>
+          </select></div>
+        <div class="col-md-4"><label class="form-label">姓名</label><input class="form-control" name="name" required></div>
+        <div class="col-md-4"><label class="form-label">邮箱</label><input class="form-control" name="email" type="email" required></div>
+        <div class="col-md-4"><label class="form-label">电话</label><input class="form-control" name="phone"></div>
+        <div class="col-md-4"><label class="form-label">密码</label><input class="form-control" name="password" type="password" required></div>
+      </div>
+      <hr class="my-3">
+      <div class="row g-3" id="workerExtra">
+        <div class="col-md-4"><label class="form-label">价格（每小时）</label><input class="form-control" type="number" step="0.01" name="price_per_hour" placeholder="120.00"></div>
+        <div class="col-md-8"><label class="form-label">专业技能（多选）</label>
+          <div class="d-flex flex-wrap gap-2">
+            {% for s in skills %}<div class="form-check">
+              <input class="form-check-input" type="checkbox" name="skills" value="{{ s }}" id="s{{ loop.index }}">
+              <label class="form-check-label" for="s{{ loop.index }}">{{ s }}</label></div>{% endfor %}
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary mt-3">注册</button>
+    </form>
+  </div></div>
+</div>
+<script>
+const roleSel = document.getElementById('roleSelect'); const wExtra = document.getElementById('workerExtra');
+function t(){ wExtra.style.display = roleSel.value==='worker' ? 'flex':'none'; } roleSel.addEventListener('change',t); t();
+</script>
+{% endblock %}

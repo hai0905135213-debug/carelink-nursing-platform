@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block content %}
+<h5 class="mb-2">我在做的订单</h5>
+<div class="row g-3">
+{% for o in my_orders %}
+  <div class="col-md-6"><div class="card p-3">
+    <div class="d-flex justify-content-between">
+      <div class="fw-semibold">{{ o.title }}</div>
+      <span class="status-badge status-{{ o.status }}">{{ {'open':'待接单','in_progress':'进行中','completed':'已完成','handover':'待接手'}[o.status] }}</span>
+    </div>
+    <div class="small text-secondary">老人：{{ o.elder_name }}</div>
+    <div class="small text-secondary">需：{{ o.skills_required }}</div>
+    <div class="d-flex gap-2 mt-2">
+      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('worker_log', order_id=o.id) }}">记录日志</a>
+      <form method="post" action="{{ url_for('worker_handover', order_id=o.id) }}"><button class="btn btn-sm btn-outline-warning">标记待接手</button></form>
+      <form method="post" action="{{ url_for('worker_complete', order_id=o.id) }}"><button class="btn btn-sm btn-success">完成订单</button></form>
+    </div>
+  </div></div>
+{% else %}<div class="text-secondary">暂无进行中的订单</div>{% endfor %}
+</div>
+
+<h5 class="mt-4 mb-2">历史接单</h5>
+<div class="row g-3">
+{% for o in history_orders %}
+  <div class="col-md-6"><div class="card p-3">
+    <div class="fw-semibold">{{ o.title }}</div>
+    <div class="small text-secondary">状态：{{ {'open':'待接单','in_progress':'进行中','completed':'已完成','handover':'待接手'}[o.status] }}</div>
+    <div class="mt-2">
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('order_detail', order_id=o.id) }}">详情</a>
+      <a class="btn btn-sm btn-outline-info" href="{{ url_for('elder_logs', order_id=o.id) }}">查看日志</a>
+    </div>
+  </div></div>
+{% else %}<div class="text-secondary">暂无历史订单</div>{% endfor %}
+</div>
+{% endblock %}

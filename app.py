@@ -1,29 +1,18 @@
 import os
 from datetime import datetime
 import re
-# 状态映射：将内部状态码映射为中文展示文本
-STATUS_MAP = {
-  'open': '待接单',
-  'in_progress': '进行中',
-  'completed': '已完成',
-  'handover': '待接手'
-}
-
-def status_label(s):
-  return STATUS_MAP.get(s, s)
 from collections import defaultdict
 
 from flask import Flask, render_template_string, request, redirect, url_for, flash, jsonify, abort
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
-from wtforms import Form, StringField, PasswordField, SelectField, FloatField, SelectMultipleField
-from wtforms.validators import DataRequired, Email, Length, Optional
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, ForeignKey, func
-from sqlalchemy.orm import scoped_session, sessionmaker, declarative_base
 
-# -------------------- Config --------------------
-DATABASE_URL = "mysql+pymysql://root:mysqlINI1999@127.0.0.1:3306/carelink"
-SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change")
+# 本模块拆分：配置、DB、模型、表单
+from config import SECRET_KEY, status_label, now, DATABASE_URL
+from db import db_session, init_db
+from models import User, Order, CareLog
+from forms import SKILL_CHOICES
+from sqlalchemy import func
 
 # -------------------- App/Ext -------------------
 app = Flask(__name__)
@@ -31,115 +20,23 @@ app.secret_key = SECRET_KEY
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 
+# 注册全局 Jinja 变量，确保在被 import 时也可用（避免仅在 __main__ 分支注册）
+app.jinja_env.globals.update({
+  'SKILL_CHOICES': SKILL_CHOICES,
+  'now': datetime.utcnow,
+  'status_label': status_label,
+})
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
-Session = scoped_session(sessionmaker(bind=engine, autoflush=False, autocommit=False))
-Base = declarative_base()
-
-# -------------------- Models --------------------
-class User(Base, UserMixin):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
-    role = Column(String(16), nullable=False)  # worker/elder/family
-    name = Column(String(64), nullable=False)
-    email = Column(String(120), unique=True, nullable=False)
-    phone = Column(String(32))
-    password_hash = Column(String(255), nullable=False)
-    price_per_hour = Column(Float)
-    rating = Column(Float, default=5.0)
-    skills_display = Column(String(255))
-    elder_profile_complete = Column(Integer, default=0)
-    bound_elder_id = Column(Integer, ForeignKey("users.id"))
-
-    def is_worker(self): return self.role == "worker"
-    def is_elder(self): return self.role == "elder"
-    def is_family(self): return self.role == "family"
-
-class Order(Base):
-    __tablename__ = "orders"
-    id = Column(Integer, primary_key=True)
-    elder_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    title = Column(String(120), nullable=False)
-    description = Column(Text, nullable=False)
-    skills_required = Column(String(255))
-    status = Column(String(16), default="open")  # open/accepted/in_progress/completed/handover
-    created_at = Column(DateTime, default=datetime.utcnow)
-    accepted_worker_id = Column(Integer, ForeignKey("users.id"))
-    handover_notes = Column(Text)  # 任务交接备注
-
-class CareLog(Base):
-    __tablename__ = "care_logs"
-    id = Column(Integer, primary_key=True)
-    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
-    worker_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    content = Column(Text, nullable=False)
-    anomalies = Column(Text)
-    duration_minutes = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-Base.metadata.create_all(engine)
-
-# -------------------- Seed ----------------------
-def seed():
-    db = Session()
-    try:
-        if db.query(User).count() == 0:
-            w = User(role="worker", name="护工小李", email="worker@hlzl.test",
-                     phone="18800001111", password_hash=generate_password_hash("pass123"),
-                     price_per_hour=120, rating=4.8, skills_display="喂药, 洗澡, 陪伴")
-            e = User(role="elder", name="王老先生", email="elder@hlzl.test",
-                     phone="18800002222", password_hash=generate_password_hash("pass123"),
-                     elder_profile_complete=1)
-            f = User(role="family", name="家属李先生", email="family@hlzl.test",
-                     phone="18800003333", password_hash=generate_password_hash("pass123"))
-            db.add_all([w, e, f])
-            db.commit() 
-            f.bound_elder_id = e.id
-            o = Order(elder_id=e.id, title="日常护理与陪伴",
-                      description="每日晚餐前喂药，晚间简单擦洗与聊天半小时。",
-                      skills_required="喂药, 陪伴", status="open")
-            db.add(o)
-            log = CareLog(order_id=o.id, worker_id=w.id, 
-                         content="今日喂药顺利完成，老人精神状态良好",
-                         anomalies="无异常", duration_minutes=45)
-            db.add(log)
-            db.commit()
-            print("数据库已初始化，测试账号：")
-            print("护工: 护工小李 / worker@hlzl.test / pass123")
-            print("老人: 王老先生 / elder@hlzl.test / pass123")
-            print("家属: 家属李先生 / family@hlzl.test / pass123")
-    except Exception as e:
-        print(f"数据库初始化失败: {e}")
-        db.rollback()
-    finally:
-        db.close()
-
-seed()
-
-# -------------------- Forms ---------------------
-SKILL_CHOICES = ["喂药", "洗澡", "陪伴", "翻身", "康复训练", "测血压", "测血糖"]
-
-class LoginForm(Form):
-    email = StringField(validators=[DataRequired(), Email()])
-    password = PasswordField(validators=[DataRequired()])
-
-class RegisterForm(Form):
-    role = SelectField(choices=[("worker","护工"),("elder","老人"),("family","家属")], validators=[DataRequired()])
-    name = StringField(validators=[DataRequired(), Length(min=2, max=32)])
-    email = StringField(validators=[DataRequired(), Email()])
-    phone = StringField(validators=[Optional(), Length(max=32)])
-    password = PasswordField(validators=[DataRequired(), Length(min=4)])
-    price_per_hour = FloatField(validators=[Optional()])
-    skills = SelectMultipleField(choices=[(s,s) for s in SKILL_CHOICES], validators=[Optional()])
+# 模型、表单、DB 等已拆至 modules：models.py / forms.py / db.py
 
 # -------------------- Login ---------------------
 @login_manager.user_loader
 def load_user(uid):
-    db = Session()
-    try:
-        return db.get(User, int(uid))
-    finally:
-        db.close()
+  db = db_session()
+  try:
+    return db.get(User, int(uid))
+  finally:
+    db.close()
 
 # -------------------- Templates (inline) --------
 BASE = """
@@ -150,6 +47,7 @@ BASE = """
 <title>护理智联</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Merriweather:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
@@ -204,6 +102,79 @@ BASE = """
 </body></html>
 """
 
+SAFETY = """
+{% extends 'BASE' %}
+{% block content %}
+<div class="card p-4">
+  <div class="d-flex align-items-center gap-3 mb-3">
+    <div class="fs-4 fw-semibold">平台安全保障</div>
+    <div class="text-secondary">我们致力于为用户与护工提供可信赖的服务体验</div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-4">
+      <div class="card p-3 h-100">
+        <div class="d-flex align-items-center mb-2">
+          <div class="me-3 stat-icon bg-gradient-primary"><i class="bi bi-shield-check fs-4"></i></div>
+          <div>
+            <div class="fw-semibold">护工资质认证</div>
+            <div class="small text-secondary">所有护工通过身份与资质审核，凭证可查。</div>
+          </div>
+        </div>
+        <ul class="small text-secondary">
+          <li>身份证与从业证核验</li>
+          <li>面试与背景核实</li>
+          <li>定期培训记录</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card p-3 h-100">
+        <div class="d-flex align-items-center mb-2">
+          <div class="me-3 stat-icon bg-gradient-accent"><i class="bi bi-shield-lock fs-4"></i></div>
+          <div>
+            <div class="fw-semibold">服务与责任保险</div>
+            <div class="small text-secondary">覆盖服务过程中的意外与责任赔付。</div>
+          </div>
+        </div>
+        <div class="small text-secondary">针对不同服务等级，我们为用户与护工购买商业责任险，理赔通道透明。</div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card p-3 h-100">
+        <div class="d-flex align-items-center mb-2">
+          <div class="me-3 stat-icon" style="background:linear-gradient(90deg,#ffd166,#ff7a59)"><i class="bi bi-people-fill fs-4"></i></div>
+          <div>
+            <div class="fw-semibold">实时监控与日志共享</div>
+            <div class="small text-secondary">护理日志与时间线对相关人可见，接手人员可无缝交接。</div>
+          </div>
+        </div>
+        <div class="small text-secondary">护理时长、任务完成情况、交接备注都会被记录，支持导出。</div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="my-4">
+  <h6 class="mb-3">常见问题</h6>
+  <div class="accordion" id="faq">
+    <div class="accordion-item">
+      <h2 class="accordion-header" id="q1"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#c1">护工如何通过认证？</button></h2>
+      <div id="c1" class="accordion-collapse collapse" data-bs-parent="#faq"><div class="accordion-body">提交身份证与从业证，平台进行人工/自动核验并保留证照照片与审核记录。</div></div>
+    </div>
+    <div class="accordion-item">
+      <h2 class="accordion-header" id="q2"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#c2">发生纠纷如何处理？</button></h2>
+      <div id="c2" class="accordion-collapse collapse" data-bs-parent="#faq"><div class="accordion-body">平台提供调解通道，并根据情形启动保险理赔或第三方介入。</div></div>
+    </div>
+  </div>
+
+  <div class="mt-4 d-flex gap-2">
+    <a class="btn btn-primary" href="{{ url_for('index') }}">返回首页</a>
+    <a class="btn btn-outline-secondary" href="mailto:support@example.com">联系客服</a>
+  </div>
+</div>
+{% endblock %}
+"""
+
 HOME = """
 {% extends 'BASE' %}
 {% block content %}
@@ -220,6 +191,14 @@ HOME = """
       <a class="btn btn-outline-light" href="{{ url_for('elder_create') if current_user.is_authenticated else url_for('login') }}"><i class="bi bi-plus-circle me-1"></i>发布护理订单</a>
     </div>
   </div>
+</div>
+
+<!-- Trust strip / quick stats -->
+<div class="row g-3 mb-3">
+  <div class="col-md-3"><div class="stat-mini"><div class="icon icon-verify bg-gradient-primary"><i class="bi bi-award"></i></div><div class="meta">已认证护工<div class="value">1,234</div></div></div></div>
+  <div class="col-md-3"><div class="stat-mini"><div class="icon icon-insure bg-gradient-accent"><i class="bi bi-shield-check"></i></div><div class="meta">服务保障<div class="value">商业保险</div></div></div></div>
+  <div class="col-md-3"><div class="stat-mini"><div class="icon icon-trace bg-gradient-primary"><i class="bi bi-journal-text"></i></div><div class="meta">共享日志<div class="value">可追溯</div></div></div></div>
+  <div class="col-md-3"><div class="stat-mini"><div class="icon icon-trace bg-gradient-accent"><i class="bi bi-people-fill"></i></div><div class="meta">活跃用户<div class="value">5,678</div></div></div></div>
 </div>
 
 <div class="row g-4">
@@ -397,6 +376,35 @@ ORDER_DETAIL = """
   </div>
   {% endif %}
 </div>
+<div class="row g-3 mt-3">
+  <div class="col-md-4">
+    <div class="card p-3">
+      <div class="fw-semibold mb-2">责任保险</div>
+      <div class="small text-secondary">本订单支持商业责任险，理赔渠道透明。若需理赔请联系客服。</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3">
+      <div class="fw-semibold mb-2">交接记录</div>
+      <div class="small text-secondary">以下为交接摘要（占位）：</div>
+      <ul class="small text-secondary mt-2">
+        <li>2026-02-10 10:00：护工 A 完成早间护理</li>
+        <li>2026-02-11 18:20：护工 B 交接并补充用药记录</li>
+      </ul>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3">
+      <div class="fw-semibold mb-2">相关证书</div>
+      <div class="small text-secondary">护工证书与培训记录（占位图）：</div>
+      <div class="d-flex gap-2 mt-2">
+        <div class="badge bg-light text-dark">身份证</div>
+        <div class="badge bg-light text-dark">从业证</div>
+        <div class="badge bg-light text-dark">急救证</div>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- 可视化区域：护理时长时序与护工时长占比 -->
 <div class="row g-3 mt-4">
   <div class="col-md-8">
@@ -545,7 +553,17 @@ WORKER_PUBLIC = """
   <div class="d-flex justify-content-between align-items-start">
     <div>
       <div class="fs-4 fw-semibold">{{ w.name }}</div>
-      <div class="small text-secondary">评分：{{ '%.1f'|format(w.rating or 0) }} · {{ w.phone or '未公开' }}</div>
+      <div class="small text-secondary">评分：
+        {% for i in range(1,6) %}
+          {% if (w.rating or 0) >= i %}
+            <i class="bi bi-star-fill text-warning"></i>
+          {% elif (w.rating or 0) >= i-0.5 %}
+            <i class="bi bi-star-half text-warning"></i>
+          {% else %}
+            <i class="bi bi-star text-muted"></i>
+          {% endif %}
+        {% endfor %}
+        · {{ w.phone or '未公开' }}</div>
     </div>
     <div class="text-end">
       <div class="fw-semibold text-primary">¥{{ '%.0f'|format(w.price_per_hour or 0) }}/小时</div>
@@ -555,6 +573,14 @@ WORKER_PUBLIC = """
   <hr class="my-3">
   <div class="mb-2"><strong>专业技能</strong></div>
   <div class="text-secondary">{{ w.skills_display or '未填写' }}</div>
+
+  <div class="mt-3">
+    <div class="fw-semibold mb-2">证书与培训</div>
+    <div class="d-flex gap-2">
+      <div class="card p-2 text-center" style="min-width:120px"><div class="fw-semibold">从业证</div><div class="small text-secondary">已认证</div></div>
+      <div class="card p-2 text-center" style="min-width:120px"><div class="fw-semibold">急救证</div><div class="small text-secondary">已完成</div></div>
+    </div>
+  </div>
 
   <div class="mt-3 d-flex gap-2">
     <a class="btn btn-primary" href="{{ url_for('index') }}">返回首页</a>
@@ -653,7 +679,8 @@ def index():
             dict(title="心理慰藉", icon="bi-chat-dots", items=["陪伴聊天","心理疏导","读书读报"]),
             dict(title="居家服务", icon="bi-house-heart", items=["环境清洁","简单家务","陪同就医"]),
         ]
-        return rtemplate(HOME, latest_orders=latest_orders, services=services)
+        # render from file-based template
+        return render_template_string(open(os.path.join(os.path.dirname(__file__), 'templates', 'home.html')).read(), latest_orders=latest_orders, services=services, now=datetime.utcnow())
     finally:
         db.close()
 
@@ -661,10 +688,11 @@ def index():
 def order_detail(order_id):
     db = db_session()
     try:
-        o = db.get(Order, order_id) or abort(404)
-        elder = db.get(User, o.elder_id)
-        w = db.get(User, o.accepted_worker_id) if o.accepted_worker_id else None
-        return rtemplate(ORDER_DETAIL, o=o, elder=elder, w=w)
+      o = db.get(Order, order_id) or abort(404)
+      elder = db.get(User, o.elder_id)
+      w = db.get(User, o.accepted_worker_id) if o.accepted_worker_id else None
+      from flask import render_template
+      return render_template('order_detail.html', o=o, elder=elder, w=w, now=datetime.utcnow())
     finally:
         db.close()
 
@@ -684,7 +712,8 @@ def login():
             flash("邮箱或密码错误","danger")
         finally:
             db.close()
-    return rtemplate(LOGIN)
+    from flask import render_template
+    return render_template('login.html')
 
 @app.route("/register", methods=["GET","POST"])
 def register():
@@ -728,11 +757,10 @@ def register():
             return redirect(url_for("index"))
         finally:
             db.close()
-    return rtemplate(REGISTER, skills=SKILL_CHOICES)
+    from flask import render_template
+    return render_template('register.html', skills=SKILL_CHOICES)
 
-# -------------------- Helpers（新增：确保 rtemplate 与 db_session 可用，避免模板继承导致的 NameError/无页面）------------
-def db_session():
-    return Session()
+# DB 会话通过 `from db import db_session` 提供（拆分到 db.py）
 
 
 ELDER_CREATE = """
@@ -772,13 +800,14 @@ def elder_create():
             return redirect(url_for("order_detail", order_id=o.id))
         finally:
             db.close()
-    return rtemplate(ELDER_CREATE)
+    from flask import render_template
+    return render_template('elder_create.html')
 
 
 # --- Minimal stubs for referenced endpoints to avoid BuildError when rendering templates ---
 @app.route("/safety")
 def safety():
-    return rtemplate("""{% extends 'BASE' %}{% block content %}<div class='card p-4'><h5>安全保障</h5><div class='text-secondary'>平台安全保障信息。</div></div>{% endblock %}""")
+  return rtemplate(SAFETY)
 
 @app.route('/logout')
 def logout():
@@ -807,20 +836,8 @@ def elder_orders():
     workers = {u.id: u.name for u in db.query(User).filter(User.role=='worker').all()}
     for o in orders:
       ods.append(type('O', (), dict(id=o.id, title=o.title, status=o.status, skills_required=o.skills_required, worker_name=workers.get(o.accepted_worker_id))))
-    return rtemplate("""{% extends 'BASE' %}{% block content %}
-<h5 class='mb-3'>我的订单</h5>
-<div class='row g-3'>
-{% for o in orders %}
-  <div class='col-md-6'><div class='card p-3'>
-  <div class='fw-semibold'>{{ o.title }}</div>
-  <div class='small text-secondary'>状态：{{ status_label(o.status) }} · 护工：{{ o.worker_name or '—' }}</div>
-  <div class='mt-2'><a class='btn btn-sm btn-outline-primary' href='{{ url_for("order_detail", order_id=o.id) }}'>详情</a></div>
-  </div></div>
-{% else %}
-  <div class='text-secondary'>暂无订单</div>
-{% endfor %}
-</div>
-{% endblock %}""", orders=ods)
+    from flask import render_template
+    return render_template('elder_orders.html', orders=ods, status_label=status_label)
   finally:
     db.close()
 
@@ -832,21 +849,8 @@ def elder_workers():
         workers = []
         for w in ws:
             workers.append(type('W', (), dict(id=w.id, name=w.name, price=w.price_per_hour, rating=w.rating, skills=w.skills_display)))
-        return rtemplate("""{% extends 'BASE' %}{% block content %}
-<h5 class='mb-3'>护工列表</h5>
-<div class='row g-3'>
-{% for w in workers %}
-  <div class='col-md-4'><div class='card p-3'>
-    <div class='fw-semibold'>{{ w.name }}</div>
-    <div class='small text-secondary'>¥{{ '%.0f'|format(w.price or 0) }}/小时 · 评分 {{ '%.1f'|format(w.rating or 0) }}</div>
-    <div class='text-secondary small'>{{ w.skills or '未填写' }}</div>
-    <div class='mt-2'><a class='btn btn-sm btn-outline-primary' href='{{ url_for("worker_public", worker_id=w.id) }}'>查看</a></div>
-  </div></div>
-{% else %}
-  <div class='text-secondary'>暂无护工</div>
-{% endfor %}
-</div>
-{% endblock %}""", workers=workers)
+        from flask import render_template
+        return render_template('elder_workers.html', workers=workers)
     finally:
         db.close()
 
@@ -979,7 +983,8 @@ def analytics():
         avg_per_day = int(sum(values) / max(1, len(values))) if values else 0
 
         stats = { 'total_minutes': total_minutes, 'total_workers': total_workers, 'avg_per_day': avg_per_day }
-        return rtemplate(ANALYTICS, daily_labels=labels, daily_values=values, worker_labels=worker_labels, worker_values=worker_values, stats=stats)
+        from flask import render_template
+        return render_template('analytics.html', daily_labels=labels, daily_values=values, worker_labels=worker_labels, worker_values=worker_values, stats=stats)
     finally:
         db.close()
 
@@ -1044,29 +1049,35 @@ def worker_profile():
 def worker_available_orders():
     return rtemplate(WORKER_AVAILABLE_ORDERS, available=[])
 
-def rtemplate(tpl_str, **ctx):
+def rtemplate(tpl_str=None, **ctx):
     """
-    将内联 BASE 模板和子模板安全合并并渲染。
-    子模板中使用 {% extends 'BASE' %} 的写法会被移除，内容会注入 BASE 的 content block。
+    渲染模板：优先使用 `templates/*.html` 文件（若 tpl_str 为模板名或 None），
+    否则当 tpl_str 是内联模板字符串时仍回退到原先的合并逻辑以兼容历史用法。
     """
-    # 准备子模板主体（移除 extends 声明，避免 Jinja 寻找命名模板）
-    body = tpl_str.replace("{% extends 'BASE' %}", "").strip()
+    ctx.setdefault("now", datetime.utcnow())
 
-    # 如果子模板自身也定义了 {% block content %}，提取其内部内容以避免在同一模板中重复定义同名 block
+    # 当传入的 tpl_str 与 templates 目录中的文件匹配时，直接使用 render_template
+    if isinstance(tpl_str, str) and tpl_str.strip().endswith('.html'):
+        # 直接使用模板文件名
+        return render_template_string(open(os.path.join(os.path.dirname(__file__), 'templates', tpl_str)).read(), **ctx)
+
+    # 如果 tpl_str 是 None 或不是文件名，则尝试将其视为内联模板内容（保留旧行为）
+    if not tpl_str:
+        # 若无 tpl_str，默认渲染 home.html
+        from flask import render_template
+        return render_template('home.html', **ctx)
+
+    body = tpl_str.replace("{% extends 'BASE' %}", "").strip()
     m = re.search(r"{%\s*block\s+content\s*%}(.*?){%\s*endblock\s*%}", body, re.S)
     if m:
       body = m.group(1).strip()
 
-    # 找到 BASE 中的 content block 占位并替换
     marker = "{% block content %}{% endblock %}"
     if marker in BASE:
       full = BASE.replace(marker, "{% block content %}\n" + body + "\n{% endblock %}")
     else:
-      # 回退：直接拼接
       full = BASE + "\n" + body
 
-    # 提供常用上下文变量
-    ctx.setdefault("now", datetime.utcnow())
     return render_template_string(full, **ctx)
 
 def require_family():
@@ -1079,20 +1090,47 @@ def require_worker():
     return current_user.is_authenticated and getattr(current_user, "role", None) == "worker"
     # -------------------- Main ----------------------
 if __name__ == "__main__":
-    print("=" * 50)
-    print("护理智联 平台启动中...")
-    print("=" * 50)
-    print(f"访问地址: http://localhost:5000")
-    print("测试账号:")
-    print("  护工: worker@hlzl.test / pass123")
-    print("  老人: elder@hlzl.test / pass123")
-    print("  家属: family@hlzl.test / pass123")
-    print("=" * 50)
-    
-    app.jinja_env.globals.update({
-        'SKILL_CHOICES': SKILL_CHOICES,
-      'now': datetime.utcnow,
-      'status_label': status_label
-    })
-    
-    app.run(host="0.0.0.0", port=5000, debug=True)
+  import sys
+  # 如果使用默认的 SQLite 且数据库文件不存在，自动初始化并插入示例数据，方便本地运行
+  if DATABASE_URL.startswith('sqlite'):
+    # sqlite URL like sqlite:///path.db or sqlite:///:memory:
+    if DATABASE_URL.startswith('sqlite:///') and not DATABASE_URL.endswith(':memory:'):
+      db_path = DATABASE_URL.replace('sqlite:///', '')
+      if not os.path.exists(db_path):
+        print(f"[main] 本地 SQLite 数据库 {db_path} 不存在，正在初始化并插入示例数据...")
+        init_db()
+        try:
+          from db import seed as db_seed
+          db_seed()
+        except Exception as e:
+          print(f"[main] 插入示例数据失败: {e}")
+  # 支持命令行显式初始化
+  if "--init-db" in sys.argv:
+    print("[main] 初始化数据库中...")
+    init_db()
+    print("[main] 数据库初始化完成。")
+  if "--seed" in sys.argv:
+    print("[main] 插入示例数据...")
+    try:
+      from db import seed as db_seed
+      db_seed()
+    except Exception as e:
+      print(f"[main] 插入示例数据失败: {e}")
+
+  print("=" * 50)
+  print("护理智联 平台启动中...")
+  print("=" * 50)
+  print(f"访问地址: http://localhost:5000")
+  print("测试账号:")
+  print("  护工: worker@hlzl.test / pass123")
+  print("  老人: elder@hlzl.test / pass123")
+  print("  家属: family@hlzl.test / pass123")
+  print("=" * 50)
+
+  app.jinja_env.globals.update({
+    'SKILL_CHOICES': SKILL_CHOICES,
+    'now': datetime.utcnow,
+    'status_label': status_label
+  })
+
+  app.run(host="0.0.0.0", port=5000, debug=True)

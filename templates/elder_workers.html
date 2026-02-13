@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<h5 class='mb-3'>护工列表</h5>
+<div class='row g-3'>
+{% for w in workers %}
+  <div class='col-md-4'><div class='card p-3'>
+    <div class='fw-semibold'>{{ w.name }}</div>
+    <div class='small text-secondary'>¥{{ '%.0f'|format(w.price or 0) }}/小时 · 评分 {{ '%.1f'|format(w.rating or 0) }}</div>
+    <div class='text-secondary small'>{{ w.skills or '未填写' }}</div>
+    <div class='mt-2'><a class='btn btn-sm btn-outline-primary' href='{{ url_for("worker_public", worker_id=w.id) }}'>查看</a></div>
+  </div></div>
+{% else %}
+  <div class='text-secondary'>暂无护工</div>
+{% endfor %}
+</div>
+{% endblock %}

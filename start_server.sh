@@ -3,11 +3,29 @@ set -euo pipefail
 
 # Small helper to start the Flask app safely.
 # Usage:
-#   bash start_server.sh         # interactive choose/kill disabled (prompts)
-#   FORCE_KILL=1 bash start_server.sh  # will auto-kill occupying PIDs on preferred ports
+#   ./start_server.sh                 # 自动创建 venv（若缺失），初始化 DB，启动 app
+#   FORCE_KILL=1 ./start_server.sh    # 会尝试杀掉占用端口的进程
 
-# 激活虚拟环境（若存在）
-if [ -f venv/bin/activate ]; then
+# 如果没有虚拟环境，自动创建并安装依赖
+if [ ! -d venv ]; then
+  echo "创建 Python 虚拟环境 venv 并安装依赖..."
+  python3 -m venv venv
+  # shellcheck source=/dev/null
+  source venv/bin/activate
+  # 生成简单的 requirements.txt（若不存在）
+  if [ ! -f requirements.txt ]; then
+    cat > requirements.txt <<EOF
+Flask
+flask-login
+WTForms
+SQLAlchemy
+Werkzeug
+EOF
+  fi
+  pip install --upgrade pip
+  pip install -r requirements.txt
+else
+  # 激活已有 venv
   # shellcheck source=/dev/null
   source venv/bin/activate
 fi

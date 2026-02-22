@@ -1,7 +1,11 @@
 from wtforms import Form, StringField, PasswordField, SelectField, FloatField, SelectMultipleField
 from wtforms.validators import DataRequired, Email, Length, Optional
 
-SKILL_CHOICES = ["喂药", "洗澡", "陪伴", "翻身", "康复训练", "测血压", "测血糖"]
+SKILL_CHOICES = [
+    "喂药", "洗澡", "陪伴", "翻身", "康复训练", "测血压", "测血糖",
+    "急救与复苏技术", "吸痰技术", "换药技术", "导管护理", "静脉输液/口服给药",
+    "口腔护理", "皮肤护理", "鼻饲技术"
+]
 
 
 class LoginForm(Form):

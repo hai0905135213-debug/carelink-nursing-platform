@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import scoped_session, sessionmaker, declarative_base
 from config import DATABASE_URL
 
@@ -11,10 +11,15 @@ def db_session():
     return Session()
 
 def init_db():
-    # 延迟导入 models，避免循环导入问题
-    # 导入 models 模块以注册所有模型到 Base，然后创建表
     import models  # noqa: F401
     Base.metadata.create_all(engine)
+    # 为已有 orders 表添加 paid 列（若不存在）
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN paid INTEGER DEFAULT 0"))
+            conn.commit()
+    except Exception:
+        pass
 
 
 def seed():

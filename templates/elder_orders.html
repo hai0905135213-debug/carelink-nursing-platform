@@ -1,14 +1,166 @@
-{% extends 'base.html' %}{% block content %}
-<h5 class='mb-3'>我的订单</h5>
-<div class='row g-3'>
-{% for o in orders %}
-  <div class='col-md-6'><div class='card p-3'>
-  <div class='fw-semibold'>{{ o.title }}</div>
-  <div class='small text-secondary'>状态：{{ status_label(o.status) }} · 护工：{{ o.worker_name or '—' }}</div>
-  <div class='mt-2'><a class='btn btn-sm btn-outline-primary' href='{{ url_for("order_detail", order_id=o.id) }}'>详情</a></div>
-  </div></div>
-{% else %}
-  <div class='text-secondary'>暂无订单</div>
-{% endfor %}
+{% extends 'base.html' %}
+{% block content %}
+<h5 class="mb-3">我的订单</h5>
+<div class="row g-3">
+  {% for o in orders %}
+  <div class="col-md-6 col-lg-4">
+    <div class="card p-3 h-100 order-card">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div class="fw-semibold text-dark">{{ o.title }}</div>
+        <span class="status-badge status-{{ o.status }}">{{ status_label(o.status) }}</span>
+      </div>
+      <div class="small text-secondary mb-2">
+        <i class="bi bi-person-heart me-1"></i>护工：{{ o.worker_name or '—' }}
+      </div>
+      {% if o.show_pay %}
+      <div class="pay-summary rounded-3 p-2 mb-2">
+        <div class="small text-secondary d-flex justify-content-between">
+          <span>护理 {{ o.total_minutes }} 分钟 · ¥{{ '%.0f'|format(o.hourly_rate) }}/时</span>
+        </div>
+        <div class="fw-semibold text-primary mt-1">待支付 ¥{{ '%.2f'|format(o.total_amount) }}</div>
+      </div>
+      {% elif o.paid %}
+      <div class="paid-badge rounded-3 p-2 mb-2">
+        <span class="text-success small"><i class="bi bi-check-circle-fill me-1"></i>已支付</span>
+      </div>
+      {% endif %}
+      <div class="d-flex gap-2 mt-auto">
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('order_detail', order_id=o.id) }}">详情</a>
+        {% if o.show_pay %}
+        <button type="button" class="btn btn-sm btn-primary pay-btn" data-order-id="{{ o.id }}"
+          data-title="{{ o.title }}"
+          data-base="{{ o.base_amount }}"
+          data-commission="{{ o.commission }}"
+          data-total="{{ o.total_amount }}">
+          <i class="bi bi-wallet2 me-1"></i>去支付
+        </button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="col-12">
+    <div class="text-center py-5 text-secondary">
+      <i class="bi bi-inbox display-4 d-block mb-2"></i>
+      暂无订单
+    </div>
+  </div>
+  {% endfor %}
 </div>
+
+<!-- 支付弹窗 -->
+<div class="modal fade" id="payModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content border-0 shadow-lg overflow-hidden">
+      <div class="modal-header bg-gradient-primary text-white border-0 py-3">
+        <h5 class="modal-title"><i class="bi bi-credit-card-2-front me-2"></i>护理费用支付</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-4">
+        <div class="mb-3">
+          <div class="fw-semibold text-muted small mb-2">订单：<span id="payOrderTitle"></span></div>
+          <div class="pay-breakdown rounded-3 p-3">
+            <div class="d-flex justify-content-between py-2 border-bottom border-light">
+              <span class="text-secondary">护理服务费</span>
+              <span class="fw-semibold">¥<span id="payBase">0.00</span></span>
+            </div>
+            <div class="d-flex justify-content-between py-2 border-bottom border-light">
+              <span class="text-secondary">平台佣金 <span class="text-muted">(5%)</span></span>
+              <span class="fw-semibold text-warning">¥<span id="payCommission">0.00</span></span>
+            </div>
+            <div class="d-flex justify-content-between py-3">
+              <span class="fw-bold">合计应付</span>
+              <span class="fw-bold fs-4 text-primary">¥<span id="payTotal">0.00</span></span>
+            </div>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">选择支付方式</label>
+          <div class="d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-pay-method active" data-method="alipay">
+              <i class="bi bi-alipay fs-4 d-block mb-1" style="color:#1677ff"></i>
+              <span class="small">支付宝</span>
+            </button>
+            <button type="button" class="btn btn-pay-method" data-method="wechat">
+              <i class="bi bi-wechat fs-4 d-block mb-1" style="color:#09bb07"></i>
+              <span class="small">微信支付</span>
+            </button>
+            <button type="button" class="btn btn-pay-method" data-method="bank">
+              <i class="bi bi-credit-card fs-4 d-block mb-1" style="color:#0b8f8f"></i>
+              <span class="small">银行卡</span>
+            </button>
+          </div>
+        </div>
+        <div class="text-center p-4 bg-light rounded-3">
+          <div class="mb-2 small text-muted" id="payMethodLabel">请使用支付宝扫码支付</div>
+          <img id="payQr" src="" alt="支付二维码" class="rounded-3" style="width:180px;height:180px;border:1px solid #eee">
+        </div>
+      </div>
+      <div class="modal-footer border-0 bg-light">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+        <form id="payConfirmForm" method="post" action="" class="d-inline">
+          <button type="submit" class="btn btn-primary px-4">
+            <i class="bi bi-check2-circle me-1"></i>确认支付
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.order-card { transition: transform 0.2s, box-shadow 0.2s; }
+.order-card:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(11,31,30,0.1); }
+.pay-summary { background: linear-gradient(135deg, rgba(11,143,143,0.08), rgba(11,143,143,0.04)); border: 1px solid rgba(11,143,143,0.2); }
+.paid-badge { background: rgba(47,166,106,0.12); border: 1px solid rgba(47,166,106,0.3); }
+.btn-pay-method { width: 100px; padding: 12px 8px; border: 2px solid #e9ecef; border-radius: 10px; background: #fff; transition: all 0.2s; }
+.btn-pay-method:hover { border-color: var(--brand); background: rgba(11,143,143,0.06); }
+.btn-pay-method.active { border-color: var(--brand); background: rgba(11,143,143,0.1); color: var(--brand); }
+.pay-breakdown { background: #f8faf9; }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  const modal = new bootstrap.Modal(document.getElementById('payModal'));
+  const methods = {
+    alipay: { label: '请使用支付宝扫码支付', data: 'https://www.alipay.com/' },
+    wechat: { label: '请使用微信扫码支付', data: 'weixin://pay/' },
+    bank: { label: '请使用银行卡支付', data: 'https://carelink.demo/bank' }
+  };
+  var currentOrderId = null, currentTotal = null;
+  document.querySelectorAll('.pay-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const id = this.dataset.orderId;
+      const base = this.dataset.base;
+      const commission = this.dataset.commission;
+      const total = this.dataset.total;
+      currentOrderId = id;
+      currentTotal = total;
+      document.getElementById('payOrderTitle').textContent = this.dataset.title;
+      document.getElementById('payBase').textContent = parseFloat(base).toFixed(2);
+      document.getElementById('payCommission').textContent = parseFloat(commission).toFixed(2);
+      document.getElementById('payTotal').textContent = parseFloat(total).toFixed(2);
+      document.getElementById('payConfirmForm').action = '/order/' + id + '/pay';
+      document.querySelectorAll('.btn-pay-method').forEach(b=>b.classList.remove('active'));
+      document.querySelector('.btn-pay-method[data-method="alipay"]').classList.add('active');
+      const m = methods.alipay;
+      document.getElementById('payMethodLabel').textContent = m.label;
+      document.getElementById('payQr').src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(m.data + '?order=' + id + '&amt=' + total);
+      modal.show();
+    });
+  });
+  document.querySelectorAll('.btn-pay-method').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      document.querySelectorAll('.btn-pay-method').forEach(b=>b.classList.remove('active'));
+      this.classList.add('active');
+      const method = this.dataset.method;
+      const m = methods[method];
+      document.getElementById('payMethodLabel').textContent = m.label;
+      const id = currentOrderId || (document.getElementById('payConfirmForm').action.match(/\/order\/(\d+)\/pay/) || [])[1];
+      const total = currentTotal || document.getElementById('payTotal').textContent;
+      if(id) document.getElementById('payQr').src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(m.data + '?order=' + id + '&amt=' + total);
+    });
+  });
+});
+</script>
 {% endblock %}

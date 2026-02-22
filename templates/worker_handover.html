@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card p-4">
+  <h5 class="mb-3">订单 #{{ o.id }} 交接备注</h5>
+  <form method="post">
+    <div class="mb-3"><label class="form-label">交接备注</label>
+      <textarea class="form-control" name="handover_notes" rows="5">{{ o.handover_notes or '' }}</textarea>
+    </div>
+    <button class="btn btn-primary">提交交接备注</button>
+    <a class="btn btn-outline-secondary ms-2" href="{{ url_for('order_detail', order_id=o.id) }}">返回订单</a>
+  </form>
+</div>
+{% endblock %}

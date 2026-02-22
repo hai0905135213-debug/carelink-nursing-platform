@@ -1,0 +1,38 @@
+{# 可复用的仪表盘片段：在需要显示统一 14 天趋势与护工占比的页面中包含此片段 #}
+<div class="card p-3 my-3 chart-card">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <div class="fw-semibold">近 14 天护理时长趋势</div>
+    <div class="small text-secondary">分钟 / 日</div>
+  </div>
+  <div class="chart-wrap position-relative">
+    <canvas id="lineChart" height="140"></canvas>
+    <div class="chart-overlay" id="lineChart-overlay">加载中...</div>
+    <div class="chart-loader" id="lineChart-loader"></div>
+  </div>
+
+  <hr class="my-3">
+  <div class="fw-semibold mb-2">护工服务占比</div>
+  <div class="chart-wrap position-relative">
+    <canvas id="polarChart" height="220"></canvas>
+    <div class="chart-overlay" id="polarChart-overlay">加载中...</div>
+    <div class="chart-loader" id="polarChart-loader"></div>
+  </div>
+
+  <script>
+    // 拉取统一的数据接口并注入给 analytics.js
+    (function(){
+      // 使用公开数据接口以兼容未登录用户的嵌入场景
+      fetch('/analytics/public-data').then(r=>r.json()).then(d=>{
+        window.ANALYTICS_PAYLOAD = {
+          daily_labels: d.daily_labels || [],
+          daily_values: d.daily_values || [],
+          worker_labels: d.worker_labels || [],
+          worker_values: d.worker_values || []
+        };
+        const s=document.createElement('script'); s.src='/static/js/analytics.js'; s.defer=true; document.body.appendChild(s);
+      }).catch(()=>{
+        // ignore
+      });
+    })();
+  </script>
+</div>

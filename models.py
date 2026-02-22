@@ -17,6 +17,7 @@ class User(Base, UserMixin):
     skills_display = Column(String(255))
     elder_profile_complete = Column(Integer, default=0)
     bound_elder_id = Column(Integer, ForeignKey("users.id"))
+    hospital_proof_path = Column(String(255))  # 医院证明文件路径
 
     def is_worker(self): return self.role == "worker"
     def is_elder(self): return self.role == "elder"
@@ -34,6 +35,7 @@ class Order(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     accepted_worker_id = Column(Integer, ForeignKey("users.id"))
     handover_notes = Column(Text)  # 任务交接备注
+    paid = Column(Integer, default=0)  # 0=未支付 1=已支付
 
 
 class CareLog(Base):
@@ -44,4 +46,18 @@ class CareLog(Base):
     content = Column(Text, nullable=False)
     anomalies = Column(Text)
     duration_minutes = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Rating(Base):
+    __tablename__ = "ratings"
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
+    worker_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    rater_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    score = Column(Float, nullable=False)
+    score_attitude = Column(Float)   # 服务态度 1-5
+    score_ability = Column(Float)    # 专业能力 1-5
+    score_transparent = Column(Float)  # 过程透明 1-5
+    comment = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)

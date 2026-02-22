@@ -1,0 +1,13 @@
+==================================================
+护理智联 平台启动中...
+==================================================
+访问地址: http://localhost:5001
+测试账号:
+  护工: worker@hlzl.test / pass123
+  老人: elder@hlzl.test / pass123
+  家属: family@hlzl.test / pass123
+==================================================
+ * Serving Flask app 'app'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.

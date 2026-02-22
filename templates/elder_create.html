@@ -1,14 +1,31 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="row justify-content-center">
-  <div class="col-md-8"><div class="card p-4">
-    <h5 class="mb-3">发布护理订单</h5>
-    <form method="post">
-      <div class="mb-3"><label class="form-label">标题</label><input class="form-control" name="title" required></div>
-      <div class="mb-3"><label class="form-label">需求描述</label><textarea class="form-control" name="description" rows="4" required></textarea></div>
-      <div class="mb-3"><label class="form-label">所需技能（逗号分隔）</label><input class="form-control" name="skills"></div>
-      <button class="btn btn-primary">发布</button>
-    </form>
-  </div></div>
+  <div class="col-md-8">
+    <div class="card p-4">
+      <h5 class="mb-3">发布护理订单</h5>
+      <form method="post">
+        <div class="mb-3"><label class="form-label">标题</label><input class="form-control" name="title" required></div>
+        <div class="mb-3"><label class="form-label">需求描述</label><textarea class="form-control" name="description"
+            rows="4" required></textarea></div>
+        <div class="mb-3">
+          <label class="form-label">所需技能（可多选）</label>
+          <div class="d-flex flex-wrap gap-2">
+            {% for s in SKILL_CHOICES %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="skills" value="{{ s }}" id="skill{{ loop.index }}">
+              <label class="form-check-label" for="skill{{ loop.index }}">{{ s }}</label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">其他技能需求</label>
+          <input class="form-control" name="skills_other" placeholder="如有其他技能需求请填写，多个用逗号分隔">
+        </div>
+        <button class="btn btn-primary">发布</button>
+      </form>
+    </div>
+  </div>
 </div>
 {% endblock %}

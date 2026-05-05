@@ -41,20 +41,6 @@ def format_display_name(surname, role):
     return name + suffix
 
 
-def hospital_brand(hospital_name):
-    mapping = {
-        "北京大学第三医院": {
-            "logo": "/static/img/logo-pku3h.png",
-            "short": "北医三院"
-        },
-        "首都医科大学附属北京朝阳医院": {
-            "logo": "/static/img/logo-chaoyang.png",
-            "short": "北京朝阳医院"
-        }
-    }
-    if hospital_name in mapping:
-        return mapping[hospital_name]
-    return {"logo": "", "short": hospital_name or "未绑定"}
 
 @app.context_processor
 def inject_display():
@@ -62,7 +48,7 @@ def inject_display():
         if not user:
             return '—'
         return format_display_name(getattr(user, 'name', None), getattr(user, 'role', None))
-    return dict(format_display_name=format_display_name, display_name=display_name, hospital_brand=hospital_brand)
+    return dict(format_display_name=format_display_name, display_name=display_name)
 
 # 注册全局 Jinja 变量
 app.jinja_env.globals.update({
@@ -516,17 +502,6 @@ def _price_match_score(worker_price, range_text):
     return max(35.0, min(100.0, score))
 
 
-def _hospital_authority_score(hospital_name, has_proof):
-    if not hospital_name:
-        return 45.0 if has_proof else 35.0
-    name = str(hospital_name)
-    top = ['北京大学第三医院', '首都医科大学附属北京朝阳医院']
-    strong_kw = ['北京大学', '协和', '华西', '瑞金', '同济', '三甲', '附属']
-    if any(t in name for t in top):
-        return 96.0
-    if any(k in name for k in strong_kw):
-        return 86.0 if has_proof else 78.0
-    return 72.0 if has_proof else 62.0
 
 
 def _simple_skill_match(order_skills, worker_skills):
@@ -545,15 +520,14 @@ def _rank_applicants_with_ai(order_obj, candidates):
 
     for c in candidates:
         c["base_score"] = (
-            0.38 * c["rating_avg"] +
-            0.30 * c["authority_score"] +
-            0.25 * c["price_match_score"] +
-            0.07 * c["skill_match_score"]
+            0.55 * c["rating_avg"] +
+            0.35 * c["price_match_score"] +
+            0.10 * c["skill_match_score"]
         )
 
     fallback_sorted = sorted(candidates, key=lambda x: x["base_score"], reverse=True)
     fallback_reason = (
-        f"综合评分、医院权威背书与价格匹配度，推荐 {fallback_sorted[0]['display_name']} 优先接单。"
+        f"综合评分与价格匹配度，推荐 {fallback_sorted[0]['display_name']} 优先接单。"
     )
 
     try:
@@ -572,10 +546,8 @@ def _rank_applicants_with_ai(order_obj, candidates):
                     "worker_id": c["worker_id"],
                     "worker_name": c["display_name"],
                     "rating_avg": round(c["rating_avg"], 2),
-                    "authority_score": round(c["authority_score"], 2),
                     "price_match_score": round(c["price_match_score"], 2),
                     "skill_match_score": round(c["skill_match_score"], 2),
-                    "hospital_name": c["hospital_name"] or "",
                     "skills_display": c["skills_display"] or "",
                     "price_per_hour": c["price_per_hour"] or 0
                 } for c in candidates
@@ -583,9 +555,9 @@ def _rank_applicants_with_ai(order_obj, candidates):
         }
         prompt = (
             "你是护理平台的派单评估助手。请根据输入的 order 与 candidates 做排序。"
-            "权重要求：评分/医院权威/价格匹配是主导，技能匹配权重较小。"
+            "权重要求：评分与价格匹配是主导，技能匹配权重较小。"
             "请输出 JSON：{\"ranking\":[{\"worker_id\":1,\"score\":88.5}],\"top_reason\":\"...\"}。"
-            "top_reason 请明确提及：评分、医院权威、价格匹配，并简要提一嘴技能匹配。"
+            "top_reason 请明确提及：评分、价格匹配，并简要提一嘴技能匹配。"
             "禁止输出 markdown。输入数据如下：\n" + json.dumps(payload, ensure_ascii=False)
         )
         resp = client.chat.completions.create(
@@ -698,8 +670,7 @@ def _build_admin_report_payload(db):
         "name": format_display_name(w.name, "worker"),
         "price_per_hour": w.price_per_hour,
         "rating": w.rating,
-        "skills": w.skills_display,
-        "hospital_name": getattr(w, "hospital_name", None)
+        "skills": w.skills_display
     } for w in workers]
     elder_payload = [{
         "alias": elder_alias.get(e.id, "老人X"),
@@ -762,7 +733,7 @@ def _generate_admin_report(data):
     fallback = {
         "worker_insight": [
             f"当前护工共 {len(worker_payload)} 人，已形成不同价格与技能层级。",
-            "高评分护工集中在具备医院标签与完整技能档案人群。"
+            "高评分护工集中在具备完整技能档案的人群。"
         ],
         "elder_insight": [
             "老人侧订单需求以基础生活照料与体征监测为主。",
@@ -778,7 +749,7 @@ def _generate_admin_report(data):
         ],
         "risk_insight": [
             "个别需求标签描述不标准，影响匹配精度。",
-            "医院标签未完成绑定的护工在高信任场景下转化率偏低。"
+            "技能档案不完整的护工在高信任场景下转化率偏低。"
         ],
         "suggestions": [
             "建立按需求标签分层的护工培训与激励机制。",
@@ -1234,7 +1205,7 @@ def order_detail(order_id):
       logs = []
       for lg in raw_logs:
         nm, role = users.get(lg.worker_id, (None, 'worker'))
-        logs.append(type('L',(), dict(id=lg.id, order_id=lg.order_id, worker_id=lg.worker_id, worker_name=format_display_name(nm, role) if nm else '护工', content=lg.content, anomalies=lg.anomalies, duration_minutes=lg.duration_minutes, created_at=lg.created_at)))
+        logs.append(type('L',(), dict(id=lg.id, order_id=lg.order_id, worker_id=lg.worker_id, worker_name=format_display_name(nm, role) if nm else '护工', content=lg.content, anomalies=lg.anomalies, duration_minutes=lg.duration_minutes, created_at=lg.created_at, health_skin=getattr(lg,'health_skin','正常'), health_mobility=getattr(lg,'health_mobility','平稳'), health_digestion=getattr(lg,'health_digestion','正常'), health_mental=getattr(lg,'health_mental','清醒'), photo_path=getattr(lg,'photo_path',None))))
       if getattr(o, 'status', None) in ('open', 'handover'):
         from datetime import timedelta
         today = datetime.utcnow()
@@ -1250,10 +1221,10 @@ def order_detail(order_id):
         w1, w2 = surnames[idx[0]] + '护工', surnames[idx[1]] + '护工'
         contents_1 = ['早间护理，协助洗漱、早餐', '午间巡视，生命体征正常', '协助用药、测量血压', '晚间陪护与简单擦洗']
         logs = [
-          type('L',(), dict(id=0, order_id=order_id, worker_id=None, worker_name=w1, content=log_rng.choice(contents_1), anomalies=None, duration_minutes=log_rng.randint(35, 55), created_at=today - timedelta(days=cutoff_days_ago + 2))),
-          type('L',(), dict(id=0, order_id=order_id, worker_id=None, worker_name=w1, content=log_rng.choice(contents_1), anomalies=None, duration_minutes=log_rng.randint(22, 40), created_at=today - timedelta(days=cutoff_days_ago + 1))),
-          type('L',(), dict(id=0, order_id=order_id, worker_id=None, worker_name=w2, content='交接：{}因事暂离，由本人接手后续护理'.format(w1), anomalies=None, duration_minutes=log_rng.randint(35, 50), created_at=today - timedelta(days=cutoff_days_ago))),
-          type('L',(), dict(id=0, order_id=order_id, worker_id=None, worker_name=w2, content='护工离职，无人接单状态持续至今。', anomalies=None, duration_minutes=log_rng.randint(25, 40), created_at=today - timedelta(days=cutoff_days_ago))),
+          type('L',(), dict(id=0, order_id=order_id, worker_id=None, worker_name=w1, content=log_rng.choice(contents_1), anomalies=None, duration_minutes=log_rng.randint(35, 55), created_at=today - timedelta(days=cutoff_days_ago + 2), health_skin='正常', health_mobility='平稳', health_digestion='正常', health_mental='清醒', photo_path=None)),
+          type('L',(), dict(id=0, order_id=order_id, worker_id=None, worker_name=w1, content=log_rng.choice(contents_1), anomalies=None, duration_minutes=log_rng.randint(22, 40), created_at=today - timedelta(days=cutoff_days_ago + 1), health_skin='正常', health_mobility='平稳', health_digestion='正常', health_mental='清醒', photo_path=None)),
+          type('L',(), dict(id=0, order_id=order_id, worker_id=None, worker_name=w2, content='交接：{}因事暂离，由本人接手后续护理'.format(w1), anomalies=None, duration_minutes=log_rng.randint(35, 50), created_at=today - timedelta(days=cutoff_days_ago), health_skin='正常', health_mobility='平稳', health_digestion='正常', health_mental='清醒', photo_path=None)),
+          type('L',(), dict(id=0, order_id=order_id, worker_id=None, worker_name=w2, content='护工离职，无人接单状态持续至今。', anomalies=None, duration_minutes=log_rng.randint(25, 40), created_at=today - timedelta(days=cutoff_days_ago), health_skin='正常', health_mobility='平稳', health_digestion='正常', health_mental='清醒', photo_path=None)),
         ]
         logs.sort(key=lambda x: x.created_at, reverse=True)
 
@@ -1282,7 +1253,8 @@ def order_detail(order_id):
             content=log_rng.choice(contents),
             anomalies=None,
             duration_minutes=log_rng.randint(30, 70),
-            created_at=today - timedelta(days=d)
+            created_at=today - timedelta(days=d),
+            health_skin='正常', health_mobility='平稳', health_digestion='正常', health_mental='清醒', photo_path=None
           )))
         logs.sort(key=lambda x: x.created_at, reverse=True)
 
@@ -1726,11 +1698,10 @@ def elder_workers():
                 rating_attitude, rating_ability, rating_transparent = ratings
             
             workers.append(type('W', (), dict(
-                id=w.id, 
-                name=w.name, 
-                price=w.price_per_hour, 
-                rating=w.rating, 
-                hospital_name=getattr(w, 'hospital_name', None),
+                id=w.id,
+                name=w.name,
+                price=w.price_per_hour,
+                rating=w.rating,
                 rating_attitude=rating_attitude,
                 rating_ability=rating_ability,
                 rating_transparent=rating_transparent,
@@ -1786,11 +1757,8 @@ def elder_applications():
                     "worker_id": w.id,
                     "display_name": format_display_name(w.name, 'worker'),
                     "skills_display": w.skills_display or '',
-                    "hospital_name": getattr(w, 'hospital_name', None),
-                    "has_proof": bool(getattr(w, 'hospital_proof_path', None)),
                     "price_per_hour": float(w.price_per_hour or 0),
                     "rating_avg": float(rating_avg),
-                    "authority_score": _hospital_authority_score(getattr(w, 'hospital_name', None), bool(getattr(w, 'hospital_proof_path', None))),
                     "price_match_score": _price_match_score(float(w.price_per_hour or 0), getattr(o, 'acceptable_price_range', None)),
                     "skill_match_score": _simple_skill_match(o.skills_required, w.skills_display)
                 })
@@ -2558,47 +2526,6 @@ def _allowed_file(filename):
 
 def _allowed_log_photo(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in LOG_ALLOWED_EXTENSIONS
-
-@app.route('/worker/hospital-bind', methods=['GET','POST'])
-@login_required
-def worker_hospital_bind():
-    if not require_worker():
-        flash('只有护工可以访问医院绑定页面','warning')
-        return redirect(url_for('index'))
-    if request.method == 'POST':
-        hospital_name = (request.form.get('hospital_name') or '').strip()
-        if not hospital_name:
-            flash('请先选择或填写医院名称', 'warning')
-            return redirect(url_for('worker_hospital_bind'))
-        f = request.files.get('hospital_proof')
-        if f and f.filename and _allowed_file(f.filename):
-            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-            ext = f.filename.rsplit('.', 1)[1].lower()
-            fn = secure_filename(f"{current_user.id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.{ext}")
-            path = os.path.join(UPLOAD_FOLDER, fn)
-            f.save(path)
-            db = db_session()
-            try:
-                u = db.get(User, current_user.id)
-                if u:
-                    u.hospital_proof_path = f"uploads/{fn}"
-                    u.hospital_name = hospital_name
-                    db.add(u)
-                    db.commit()
-                flash('医院证明已提交，我们将尽快审核','success')
-            finally:
-                db.close()
-        else:
-            flash('请上传 PDF、PNG 或 JPG 格式的医院证明文件','warning')
-        return redirect(url_for('worker_hospital_bind'))
-    db = db_session()
-    try:
-        u = db.get(User, current_user.id)
-        has_proof = bool(u and getattr(u, 'hospital_proof_path', None))
-        current_hospital = getattr(u, 'hospital_name', None) if u else None
-    finally:
-        db.close()
-    return render_template('worker_hospital_bind.html', has_proof=has_proof, current_hospital=current_hospital)
 
 @app.route('/worker/available')
 def worker_available_orders():

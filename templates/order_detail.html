@@ -53,15 +53,24 @@
   <div class="col-md-4">
     <div class="card p-3">
       <div class="fw-semibold mb-2">交接记录</div>
-      <div class="small text-secondary">以下为交接与护理日志记录：</div>
+      <div class="small text-secondary">点击条目查看完整护理日志：</div>
       <div class="mt-2">
         {% if logs %}
-        <ul class="small text-secondary mt-2">
+        <div class="list-group list-group-flush">
           {% for lg in logs %}
-          <li>{{ lg.created_at.strftime('%Y-%m-%d %H:%M') }}：{{ lg.worker_name or '护工' }} — {{ lg.duration_minutes }} 分钟
-            · {{ lg.content }}</li>
+          <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-start py-2 px-0 border-0 border-bottom log-entry-btn"
+                  data-log-idx="{{ loop.index0 }}">
+            <div class="me-auto">
+              <div class="small fw-semibold">{{ lg.worker_name or '护工' }}</div>
+              <div class="small text-secondary">{{ lg.content[:30] }}{% if lg.content|length > 30 %}...{% endif %}</div>
+            </div>
+            <div class="text-end">
+              <span class="badge bg-secondary rounded-pill">{{ lg.duration_minutes }}分钟</span>
+              <div class="small text-secondary mt-1">{{ lg.created_at.strftime('%m-%d %H:%M') }}</div>
+            </div>
+          </button>
           {% endfor %}
-        </ul>
+        </div>
         {% else %}
         <div class="small text-secondary mt-2">暂无护理日志</div>
         {% endif %}
@@ -427,6 +436,104 @@
         btn.innerHTML = originalText;
       });
   }
+</script>
+<!-- 日志详情弹窗 -->
+<div class="modal fade" id="logDetailModal" tabindex="-1" aria-labelledby="logDetailModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title" id="logDetailModalLabel">护理日志详情</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="logDetailBody">
+        <!-- 动态填充 -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var logsData = [
+    {% for lg in logs %}
+    {
+      "idx": {{ loop.index0 }},
+      "worker_name": {{ (lg.worker_name or '护工')|tojson }},
+      "created_at": "{{ lg.created_at.strftime('%Y-%m-%d %H:%M') }}",
+      "duration_minutes": {{ lg.duration_minutes or 0 }},
+      "health_skin": {{ (lg.health_skin or '正常')|tojson }},
+      "health_mobility": {{ (lg.health_mobility or '平稳')|tojson }},
+      "health_digestion": {{ (lg.health_digestion or '正常')|tojson }},
+      "health_mental": {{ (lg.health_mental or '清醒')|tojson }},
+      "content": {{ lg.content|tojson }},
+      "anomalies": {{ (lg.anomalies or '')|tojson }},
+      "photo_path": {{ (lg.photo_path or '')|tojson }}
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ];
+
+  function isAbnormal(val, normal) {
+    return val && val !== normal;
+  }
+
+  function badgeHtml(val, normalVal) {
+    if (isAbnormal(val, normalVal)) {
+      return '<span class="badge bg-warning text-dark">' + val + '</span>';
+    }
+    return '<span class="badge bg-success">' + val + '</span>';
+  }
+
+  function renderLogDetail(lg) {
+    var html = '';
+    // 基本信息
+    html += '<div class="d-flex justify-content-between align-items-center mb-3">';
+    html += '<div><i class="bi bi-person-fill text-primary me-1"></i><strong>' + lg.worker_name + '</strong></div>';
+    html += '<span class="badge bg-light text-dark"><i class="bi bi-clock me-1"></i>' + lg.created_at + '</span>';
+    html += '</div>';
+    html += '<div class="mb-3"><span class="badge bg-primary rounded-pill"><i class="bi bi-stopwatch me-1"></i>' + lg.duration_minutes + ' 分钟</span></div>';
+
+    // 健康指标
+    html += '<div class="card bg-light border-0 mb-3">';
+    html += '<div class="card-body py-2 px-3">';
+    html += '<div class="small fw-semibold text-muted mb-2"><i class="bi bi-heart-pulse me-1"></i>核心生活指标</div>';
+    html += '<div class="row g-2">';
+    html += '<div class="col-6"><div class="small text-muted">皮肤与体表</div>' + badgeHtml(lg.health_skin, '正常') + '</div>';
+    html += '<div class="col-6"><div class="small text-muted">行动与跌倒</div>' + badgeHtml(lg.health_mobility, '平稳') + '</div>';
+    html += '<div class="col-6"><div class="small text-muted">进食与排泄</div>' + badgeHtml(lg.health_digestion, '正常') + '</div>';
+    html += '<div class="col-6"><div class="small text-muted">精神与意识</div>' + badgeHtml(lg.health_mental, '清醒') + '</div>';
+    html += '</div></div></div>';
+
+    // 记录内容
+    html += '<div class="mb-3"><div class="small fw-semibold text-muted mb-1">记录内容</div>';
+    html += '<div class="border rounded p-2 bg-white small">' + lg.content + '</div></div>';
+
+    // 异常备注
+    if (lg.anomalies) {
+      html += '<div class="alert alert-warning py-2 mb-3"><i class="bi bi-exclamation-triangle me-1"></i><strong>异常/备注：</strong>' + lg.anomalies + '</div>';
+    }
+
+    // 照片
+    if (lg.photo_path) {
+      html += '<div class="mb-2"><div class="small fw-semibold text-muted mb-1">护理照片</div>';
+      html += '<img src="/static/' + lg.photo_path + '" alt="护理照片" style="max-width:100%;border-radius:8px;border:1px solid #e5e7eb;">';
+      html += '</div>';
+    }
+
+    return html;
+  }
+
+  document.querySelectorAll('.log-entry-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var idx = parseInt(this.dataset.logIdx);
+      var lg = logsData[idx];
+      if (!lg) return;
+      document.getElementById('logDetailBody').innerHTML = renderLogDetail(lg);
+      document.getElementById('logDetailModalLabel').textContent = '护理日志 — ' + lg.created_at;
+      var modal = new bootstrap.Modal(document.getElementById('logDetailModal'));
+      modal.show();
+    });
+  });
+})();
 </script>
 <script src="/static/js/analytics.js?v=3"></script>
 {% endblock %}

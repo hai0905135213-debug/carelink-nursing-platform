@@ -80,23 +80,13 @@
           <h5>护工端信息</h5>
           <div class="table-responsive">
             <table class="table table-sm">
-              <thead><tr><th>ID</th><th>姓名</th><th>价格</th><th>评分</th><th>医院标签</th><th>技能</th></tr></thead>
+              <thead><tr><th>ID</th><th>姓名</th><th>价格</th><th>评分</th><th>技能</th></tr></thead>
               <tbody>
                 {% for w in workers %}
                 <tr>
                   <td>{{ w.id }}</td><td>{{ display_name(w) }}</td>
                   <td>¥{{ '%.0f'|format(w.price_per_hour or 0) }}/h</td>
                   <td>{{ '%.2f'|format(w.rating or 0) }}</td>
-                  <td>
-                    {% if w.hospital_name %}
-                    {% set hb = hospital_brand(w.hospital_name) %}
-                    <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:999px;background:linear-gradient(135deg,#f8e7a7,#d4af37);color:#4a3a08;font-weight:700;font-size:12px;">
-                      <i class="bi bi-patch-check-fill"></i>
-                      {% if hb.logo %}<img src="{{ hb.logo }}" alt="hospital-logo" style="width:14px;height:14px;border-radius:2px;background:#fff;">{% endif %}
-                      {{ w.hospital_name }}
-                    </span>
-                    {% else %}未绑定{% endif %}
-                  </td>
                   <td>{{ w.skills_display or '—' }}</td>
                 </tr>
                 {% endfor %}

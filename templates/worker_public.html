@@ -15,18 +15,6 @@
           {% endif %}
         {% endfor %}
         · {{ w.phone or '未公开' }}</div>
-      <div class="mt-1">
-        {% if w.hospital_name %}
-        {% set hb = hospital_brand(w.hospital_name) %}
-        <span class="hospital-badge">
-          <i class="bi bi-patch-check-fill"></i>
-          {% if hb.logo %}<img src="{{ hb.logo }}" alt="hospital-logo">{% endif %}
-          {{ w.hospital_name }}
-        </span>
-        {% else %}
-        <span class="small text-secondary">医院标签：未绑定</span>
-        {% endif %}
-      </div>
       {% if rating_attitude is not none or rating_ability is not none or rating_transparent is not none %}
       <div class="mt-2">
         <div class='small text-secondary mb-1'>

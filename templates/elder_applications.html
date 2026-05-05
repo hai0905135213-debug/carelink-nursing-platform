@@ -2,7 +2,7 @@
 {% block content %}
 <div class="card p-4">
   <h5 class="mb-3">已申请护工排行</h5>
-  <div class="small text-secondary mb-4">按每个订单分别展示申请护工排行，排序综合考虑评分、医院权威、价格匹配度，并参考技能匹配。</div>
+  <div class="small text-secondary mb-4">按每个订单分别展示申请护工排行，排序综合考虑评分、价格匹配度，并参考技能匹配。</div>
 
   {% for item in rankings %}
   <div class="border rounded-3 p-3 mb-4">
@@ -28,7 +28,6 @@
           <tr>
             <th>排名</th>
             <th>护工</th>
-            <th>医院标签</th>
             <th>综合评分</th>
             <th>评分均值</th>
             <th>价格匹配</th>
@@ -49,18 +48,6 @@
             <td>
               <div class="fw-semibold">{{ c.display_name }}</div>
               <div class="small text-secondary">¥{{ '%.0f'|format(c.price_per_hour or 0) }}/小时</div>
-            </td>
-            <td>
-              {% if c.hospital_name %}
-              {% set hb = hospital_brand(c.hospital_name) %}
-              <span class="hospital-badge">
-                <i class="bi bi-patch-check-fill"></i>
-                {% if hb.logo %}<img src="{{ hb.logo }}" alt="hospital-logo">{% endif %}
-                {{ c.hospital_name }}
-              </span>
-              {% else %}
-              <span class="small text-secondary">未绑定</span>
-              {% endif %}
             </td>
             <td>{{ '%.1f'|format(c.base_score or 0) }}</td>
             <td>{{ '%.2f'|format(c.rating_avg or 0) }}</td>

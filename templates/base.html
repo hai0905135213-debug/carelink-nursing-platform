@@ -25,7 +25,6 @@
           {% if current_user.is_authenticated and current_user.role=='worker' %}
           <li class="nav-item"><a class="nav-link" href="{{ url_for('worker_orders') }}">我的接单</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('worker_profile') }}">我的资料</a></li>
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('worker_hospital_bind') }}">医院绑定</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('worker_available_orders') }}">可接订单</a></li>
           {% elif current_user.is_authenticated and current_user.role=='elder' %}
           <li class="nav-item"><a class="nav-link" href="{{ url_for('elder_create') }}">发布订单</a></li>

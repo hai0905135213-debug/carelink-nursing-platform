@@ -2,6 +2,9 @@
 {% block content %}
 <div class="card p-4">
   <h5 class="mb-3">订单 #{{ order.id }} 的护理日志</h5>
+  <div class="mb-3">
+    <button type="button" class="btn btn-sm btn-outline-dark js-order-brief-btn" data-order-id="{{ order.id }}">30秒摘要+待办</button>
+  </div>
   {% for lg in logs %}
   <div class="card p-3 mb-2">
     <div class="d-flex justify-content-between small text-secondary">

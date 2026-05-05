@@ -31,6 +31,8 @@
           <li class="nav-item"><a class="nav-link" href="{{ url_for('elder_create') }}">发布订单</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('elder_orders') }}">我的订单</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('elder_workers') }}">护工列表</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('elder_applications') }}">已申请护工</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('elder_bind_requests') }}">绑定申请</a></li>
           {% elif current_user.is_authenticated and current_user.role=='family' %}
           <li class="nav-item"><a class="nav-link" href="{{ url_for('family_overview') }}">护理概览</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('family_bind') }}">绑定老人</a></li>
@@ -60,11 +62,58 @@
     {% block content %}{% endblock %}
   </main>
 
+  <div class="modal fade" id="orderBriefModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-lightning-charge-fill me-2 text-warning"></i>30秒可读摘要 + 待办清单</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div id="briefSummary" class="mb-3 text-secondary">加载中...</div>
+          <div class="fw-semibold mb-2">待办清单</div>
+          <ul id="briefTodo" class="mb-0"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <footer class="container py-4 small text-center border-top">
     © {{ now.year }} 护理智联 · 共享护理日志 · 任务接手 · 可视化 · 护工信息透明化
   </footer>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script>
+    document.addEventListener('click', function (e) {
+      const btn = e.target.closest('.js-order-brief-btn');
+      if (!btn) return;
+      e.preventDefault();
+      const orderId = btn.dataset.orderId;
+      if (!orderId) return;
+      const modalEl = document.getElementById('orderBriefModal');
+      const modal = new bootstrap.Modal(modalEl);
+      const summaryEl = document.getElementById('briefSummary');
+      const todoEl = document.getElementById('briefTodo');
+      summaryEl.textContent = '加载中...';
+      todoEl.innerHTML = '';
+      modal.show();
+      fetch('/api/order/' + orderId + '/brief', { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.error) {
+            summaryEl.textContent = '加载失败：' + data.error;
+            return;
+          }
+          summaryEl.textContent = data.summary || '暂无摘要';
+          const todo = Array.isArray(data.todo) ? data.todo : [];
+          if (!todo.length) todoEl.innerHTML = '<li>暂无待办</li>';
+          else todoEl.innerHTML = todo.map(x => '<li>' + x + '</li>').join('');
+        })
+        .catch(() => {
+          summaryEl.textContent = '加载失败，请稍后重试。';
+        });
+    });
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 

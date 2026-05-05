@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card p-4">
+  <h5 class="mb-3">家属绑定申请</h5>
+  {% for r in requests %}
+  {% set family = families.get(r.family_id) %}
+  <div class="border rounded-3 p-3 mb-3">
+    <div class="d-flex justify-content-between align-items-start mb-2">
+      <div>
+        <div class="fw-semibold">{{ display_name(family) if family else '家属账号已不存在' }}</div>
+        <div class="small text-secondary">
+          邮箱：{{ family.email if family else '—' }} · 申请时间：{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '—' }}
+        </div>
+      </div>
+      <span class="badge {% if r.status=='pending' %}text-bg-warning{% elif r.status=='accepted' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+        {% if r.status=='pending' %}待处理{% elif r.status=='accepted' %}已通过{% else %}已拒绝{% endif %}
+      </span>
+    </div>
+    {% if r.message %}
+    <div class="small mb-2">附言：{{ r.message }}</div>
+    {% endif %}
+    {% if r.status == 'pending' %}
+    <div class="d-flex gap-2">
+      <form method="post" action="{{ url_for('elder_accept_bind_request', request_id=r.id) }}">
+        <button class="btn btn-sm btn-primary">接受申请</button>
+      </form>
+      <form method="post" action="{{ url_for('elder_reject_bind_request', request_id=r.id) }}">
+        <button class="btn btn-sm btn-outline-secondary">拒绝</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="text-secondary">目前没有家属申请。</div>
+  {% endfor %}
+</div>
+{% endblock %}

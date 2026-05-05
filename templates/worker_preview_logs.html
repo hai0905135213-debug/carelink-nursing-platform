@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card p-4">
+  <h5 class="mb-1">订单 #{{ order.id }} 历史日志预览</h5>
+  <div class="small text-secondary mb-3">用于护工接单前快速了解老人近期护理过程与注意事项。</div>
+  <div class="mb-3">
+    <button type="button" class="btn btn-sm btn-outline-dark js-order-brief-btn" data-order-id="{{ order.id }}">30秒摘要+待办</button>
+    <span class="small text-warning ms-2">接单/接手前请先阅读摘要</span>
+  </div>
+
+  {% for lg in logs %}
+  <div class="card p-3 mb-2">
+    <div class="d-flex justify-content-between small text-secondary">
+      <div>护工：{{ lg.worker_name or '匿名护工' }}</div>
+      <div>{{ lg.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+    </div>
+    <div class="mt-2"><strong>护理时长：</strong>{{ lg.duration_minutes }} 分钟</div>
+    <div class="mt-1">{{ lg.content }}</div>
+    {% if lg.anomalies %}
+    <div class="mt-2 small text-warning"><strong>异常备注：</strong>{{ lg.anomalies }}</div>
+    {% endif %}
+    {% if lg.photo_path %}
+    <div class="mt-2">
+      <img src="{{ url_for('static', filename=lg.photo_path) }}" alt="log-photo"
+        style="max-width: 240px; border-radius: 8px; border: 1px solid #e5e7eb;">
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="text-secondary">暂无历史日志</div>
+  {% endfor %}
+
+  <div class="mt-3">
+    <a class="btn btn-outline-secondary" href="{{ url_for('worker_available_orders') }}">返回可接订单</a>
+  </div>
+</div>
+{% endblock %}

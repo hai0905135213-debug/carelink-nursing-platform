@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card p-4">
+      <h5 class="mb-3">发起绑定申请</h5>
+      <form method="post">
+        <div class="mb-3">
+          <label class="form-label">老人账号邮箱</label>
+          <input class="form-control" type="email" name="email" placeholder="请输入老人注册邮箱" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">附言（可选）</label>
+          <textarea class="form-control" rows="3" name="message" placeholder="例如：我是您的家属，方便我代您处理接单与订单操作"></textarea>
+        </div>
+        <button class="btn btn-primary">发送申请</button>
+      </form>
+      {% if bound_elder %}
+      <hr>
+      <div class="small text-secondary">当前已绑定老人：<strong>{{ display_name(bound_elder) }}</strong></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card p-4">
+      <h5 class="mb-3">我的申请记录</h5>
+      {% for r in requests %}
+      {% set elder = elders.get(r.elder_id) %}
+      <div class="border rounded-3 p-3 mb-2">
+        <div class="d-flex justify-content-between">
+          <div class="small text-secondary">
+            目标老人：{{ display_name(elder) if elder else '—' }}（{{ elder.email if elder else '—' }}）
+          </div>
+          <span class="badge {% if r.status=='pending' %}text-bg-warning{% elif r.status=='accepted' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+            {% if r.status=='pending' %}待处理{% elif r.status=='accepted' %}已通过{% else %}已拒绝{% endif %}
+          </span>
+        </div>
+        <div class="small text-secondary mt-1">申请时间：{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '—' }}</div>
+        {% if r.message %}
+        <div class="small mt-2">附言：{{ r.message }}</div>
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="text-secondary">暂无申请记录</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -4,10 +4,31 @@
   <h5 class="mb-1">{{ o.title }}</h5>
   <div class="text-secondary small">发布者：{{ display_name(elder) }}</div>
   <div class="text-secondary small">需求：{{ o.skills_required or '—' }}</div>
+  <div class="text-secondary small">可接受价格区间：{{ o.acceptable_price_range or '未设置' }} 元/小时</div>
+  <div class="text-secondary small">护理地址：{{ o.address or '未填写' }}</div>
   <div class="mt-2">{{ o.description }}</div>
+  {% set risk_level = o.current_risk_level or 'low' %}
+  {% set risk_reason = o.risk_reason or '尚未生成足够日志数据或查无异常，系统暂定为低风险' %}
+  <div class="mt-3 p-3 rounded risk-card-{{ risk_level }}"
+    style="border: 1px solid; {% if risk_level == 'low' %}background-color: #d1fae5; border-color: #34d399; color: #065f46;{% elif risk_level == 'medium' %}background-color: #fef08a; border-color: #facc15; color: #b45309;{% elif risk_level == 'high' %}background-color: #fecaca; border-color: #f87171; color: #991b1b;{% endif %}">
+    <div class="d-flex align-items-center">
+      {% if risk_level == 'high' %}
+      <i class="bi bi-exclamation-octagon-fill fs-4 me-2"></i>
+      {% elif risk_level == 'medium' %}
+      <i class="bi bi-exclamation-triangle-fill fs-4 me-2"></i>
+      {% else %}
+      <i class="bi bi-check-circle-fill fs-4 me-2"></i>
+      {% endif %}
+      <h6 class="mb-0 fw-bold">当前重症/住院风险评级：{{ {'low':'低风险','medium':'中风险','high':'高危风险'}[risk_level] }}</h6>
+    </div>
+    <div class="mt-2 small opacity-75">
+      <strong>AI评估依据：</strong>{{ risk_reason }}
+    </div>
+  </div>
   <div class="mt-3">
     <span class="status-badge status-{{ o.status }}">{{
       {'open':'待接单','in_progress':'进行中','completed':'已完成','handover':'待接手'}[o.status] }}</span>
+    <button class="btn btn-sm btn-outline-dark ms-2 js-order-brief-btn" data-order-id="{{ o.id }}">30秒摘要+待办</button>
     {% if w %}<span class="badge rounded-pill text-bg-primary ms-2">护工：{{ display_name(w) }}</span>{% endif %}
     {% if current_user.is_authenticated and ((current_user.role == 'elder' and current_user.id == o.elder_id) or
     (current_user.role == 'family' and current_user.bound_elder_id == o.elder_id)) %}

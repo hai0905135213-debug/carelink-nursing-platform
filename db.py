@@ -13,13 +13,65 @@ def db_session():
 def init_db():
     import models  # noqa: F401
     Base.metadata.create_all(engine)
-    # 为已有 orders 表添加 paid 列（若不存在）
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE orders ADD COLUMN paid INTEGER DEFAULT 0"))
-            conn.commit()
-    except Exception:
-        pass
+
+    # 统一的数据库迁移：为已有表添加新列（若列已存在则忽略错误）
+    _alter_statements = [
+        # orders 表
+        "ALTER TABLE orders ADD COLUMN paid INTEGER DEFAULT 0",
+        "ALTER TABLE orders ADD COLUMN acceptable_price_range VARCHAR(32)",
+        "ALTER TABLE orders ADD COLUMN address VARCHAR(255)",
+        "ALTER TABLE orders ADD COLUMN current_risk_level VARCHAR(16) DEFAULT 'low'",
+        "ALTER TABLE orders ADD COLUMN risk_reason TEXT",
+        "ALTER TABLE orders ADD COLUMN share_insurance_data INTEGER DEFAULT 0",
+        # users 表
+        "ALTER TABLE users ADD COLUMN hospital_proof_path VARCHAR(255)",
+        "ALTER TABLE users ADD COLUMN hospital_name VARCHAR(128)",
+        # ratings 表
+        "ALTER TABLE ratings ADD COLUMN score_attitude FLOAT",
+        "ALTER TABLE ratings ADD COLUMN score_ability FLOAT",
+        "ALTER TABLE ratings ADD COLUMN score_transparent FLOAT",
+        # care_logs 表
+        "ALTER TABLE care_logs ADD COLUMN photo_path VARCHAR(255)",
+        "ALTER TABLE care_logs ADD COLUMN health_skin VARCHAR(32) DEFAULT '正常'",
+        "ALTER TABLE care_logs ADD COLUMN health_mobility VARCHAR(32) DEFAULT '平稳'",
+        "ALTER TABLE care_logs ADD COLUMN health_digestion VARCHAR(32) DEFAULT '正常'",
+        "ALTER TABLE care_logs ADD COLUMN health_mental VARCHAR(32) DEFAULT '清醒'",
+    ]
+    for stmt in _alter_statements:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(stmt))
+                conn.commit()
+        except Exception:
+            pass
+
+    # 创建可能缺失的表
+    _create_statements = [
+        """CREATE TABLE IF NOT EXISTS binding_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            family_id INTEGER NOT NULL,
+            elder_id INTEGER NOT NULL,
+            status VARCHAR(16) DEFAULT 'pending',
+            message TEXT,
+            created_at DATETIME,
+            responded_at DATETIME
+        )""",
+        """CREATE TABLE IF NOT EXISTS order_applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            worker_id INTEGER NOT NULL,
+            status VARCHAR(16) DEFAULT 'pending',
+            applied_at DATETIME,
+            reviewed_at DATETIME
+        )""",
+    ]
+    for stmt in _create_statements:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(stmt))
+                conn.commit()
+        except Exception:
+            pass
 
 
 def seed():

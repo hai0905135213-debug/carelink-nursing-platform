@@ -4,16 +4,18 @@ import re
 from collections import defaultdict
 import json
 import hashlib
+import urllib.request
+import urllib.error
 
-from flask import Flask, render_template, render_template_string, request, redirect, url_for, flash, jsonify, abort
+from flask import Flask, render_template, render_template_string, request, redirect, url_for, flash, jsonify, abort, session, make_response
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
 # 本模块拆分：配置、DB、模型、表单
 from config import SECRET_KEY, status_label, now, DATABASE_URL
-from db import db_session, init_db, engine
-from models import User, Order, CareLog
+from db import db_session, init_db, engine, Base
+from models import User, Order, CareLog, BindingRequest, OrderApplication
 from forms import SKILL_CHOICES
 from sqlalchemy import func, text
 
@@ -38,13 +40,29 @@ def format_display_name(surname, role):
         name = name[2:].strip() or name
     return name + suffix
 
+
+def hospital_brand(hospital_name):
+    mapping = {
+        "北京大学第三医院": {
+            "logo": "/static/img/logo-pku3h.png",
+            "short": "北医三院"
+        },
+        "首都医科大学附属北京朝阳医院": {
+            "logo": "/static/img/logo-chaoyang.png",
+            "short": "北京朝阳医院"
+        }
+    }
+    if hospital_name in mapping:
+        return mapping[hospital_name]
+    return {"logo": "", "short": hospital_name or "未绑定"}
+
 @app.context_processor
 def inject_display():
     def display_name(user):
         if not user:
             return '—'
         return format_display_name(getattr(user, 'name', None), getattr(user, 'role', None))
-    return dict(format_display_name=format_display_name, display_name=display_name)
+    return dict(format_display_name=format_display_name, display_name=display_name, hospital_brand=hospital_brand)
 
 # 注册全局 Jinja 变量
 app.jinja_env.globals.update({
@@ -53,28 +71,8 @@ app.jinja_env.globals.update({
   'status_label': status_label,
 })
 
-# 数据库迁移：确保新增列存在
-def _run_migrations():
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE orders ADD COLUMN paid INTEGER DEFAULT 0"))
-            conn.commit()
-    except Exception:
-        pass
-    for col in ['score_attitude', 'score_ability', 'score_transparent']:
-        try:
-            with engine.connect() as conn:
-                conn.execute(text(f"ALTER TABLE ratings ADD COLUMN {col} FLOAT"))
-                conn.commit()
-        except Exception:
-            pass
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE users ADD COLUMN hospital_proof_path VARCHAR(255)"))
-            conn.commit()
-    except Exception:
-        pass
-_run_migrations()
+# 数据库迁移：在启动时确保表结构与新增列同步
+init_db()
 
 # 模型、表单、DB 等已拆至 modules：models.py / forms.py / db.py
 
@@ -115,6 +113,8 @@ BASE = """
           <li class="nav-item"><a class="nav-link" href="{{ url_for('elder_create') }}">发布订单</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('elder_orders') }}">我的订单</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('elder_workers') }}">护工列表</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('elder_applications') }}">已申请护工</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('elder_bind_requests') }}">绑定申请</a></li>
         {% elif current_user.is_authenticated and current_user.role=='family' %}
           <li class="nav-item"><a class="nav-link" href="{{ url_for('family_overview') }}">护理概览</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('family_bind') }}">绑定老人</a></li>
@@ -147,7 +147,54 @@ BASE = """
 <footer class="container py-4 small text-center border-top">
   © {{ now.year }} 护理智联 · 共享护理日志 · 任务接手 · 可视化 · 护工信息透明化
 </footer>
+<div class="modal fade" id="orderBriefModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-lightning-charge-fill me-2 text-warning"></i>30秒可读摘要 + 待办清单</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="briefSummary" class="mb-3 text-secondary">加载中...</div>
+        <div class="fw-semibold mb-2">待办清单</div>
+        <ul id="briefTodo" class="mb-0"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.js-order-brief-btn');
+    if (!btn) return;
+    e.preventDefault();
+    const orderId = btn.dataset.orderId;
+    if (!orderId) return;
+    const modalEl = document.getElementById('orderBriefModal');
+    const modal = new bootstrap.Modal(modalEl);
+    const summaryEl = document.getElementById('briefSummary');
+    const todoEl = document.getElementById('briefTodo');
+    summaryEl.textContent = '加载中...';
+    todoEl.innerHTML = '';
+    modal.show();
+    fetch('/api/order/' + orderId + '/brief', { credentials: 'same-origin' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) {
+          summaryEl.textContent = '加载失败：' + data.error;
+          return;
+        }
+        summaryEl.textContent = data.summary || '暂无摘要';
+        const todo = Array.isArray(data.todo) ? data.todo : [];
+        if (!todo.length) todoEl.innerHTML = '<li>暂无待办</li>';
+        else todoEl.innerHTML = todo.map(x => '<li>' + x + '</li>').join('');
+      })
+      .catch(() => {
+        summaryEl.textContent = '加载失败，请稍后重试。';
+      });
+  });
+</script>
 </body></html>
 """
 
@@ -224,153 +271,13 @@ SAFETY = """
 {% endblock %}
 """
 
-HOME = """
-{% extends 'BASE' %}
-{% block content %}
-<div class="hero mb-4">
-  <div class="d-flex flex-column flex-md-row align-items-md-end justify-content-between">
-    <div>
-      <h2 class="fw-bold mb-1">护理智联 智慧护理平台</h2>
-      <div class="opacity-75">共享护理日志 · 任务无缝接手 · 时间图表可视化 · 护工信息透明化</div>
-    </div>
-    <div class="mt-3 mt-md-0">
-      {% if not current_user.is_authenticated %}
-      <a class="btn btn-light me-2" href="{{ url_for('register') }}"><i class="bi bi-box-arrow-in-right me-1"></i>马上加入</a>
-      {% endif %}
-      <a class="btn btn-outline-light" href="{{ url_for('elder_create') if current_user.is_authenticated else url_for('login') }}"><i class="bi bi-plus-circle me-1"></i>发布护理订单</a>
-    </div>
-  </div>
-</div>
 
-<!-- Trust strip / quick stats -->
-<div class="row g-3 mb-3">
-  <div class="col-md-3"><div class="stat-mini"><div class="icon icon-verify bg-gradient-primary"><i class="bi bi-award"></i></div><div class="meta">已认证护工<div class="value">1,234</div></div></div></div>
-  <div class="col-md-3"><div class="stat-mini"><div class="icon icon-insure bg-gradient-accent"><i class="bi bi-shield-check"></i></div><div class="meta">服务保障<div class="value">商业保险</div></div></div></div>
-  <div class="col-md-3"><div class="stat-mini"><div class="icon icon-trace bg-gradient-primary"><i class="bi bi-journal-text"></i></div><div class="meta">共享日志<div class="value">可追溯</div></div></div></div>
-  <div class="col-md-3"><div class="stat-mini"><div class="icon icon-trace bg-gradient-accent"><i class="bi bi-people-fill"></i></div><div class="meta">活跃用户<div class="value">5,678</div></div></div></div>
-</div>
 
-<div class="row g-4">
-  <div class="col-md-4"><div class="card p-4 feature">
-    <div class="d-flex align-items-center mb-2"><i class="bi bi-person-heart me-2"></i><h5 class="mb-0">专业护工</h5></div>
-    <div class="text-secondary mb-3">持证上岗、经验丰富、专业背景审核</div>
-    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('elder_workers') if current_user.is_authenticated else url_for('login') }}">查看护工</a>
-  </div></div>
 
-  {% if not (current_user.is_authenticated and current_user.role=='worker') %}
-  <div class="col-md-4"><div class="card p-4 feature">
-    <div class="d-flex align-items-center mb-2"><i class="bi bi-clock-history me-2"></i><h5 class="mb-0">快速响应</h5></div>
-    <div class="text-secondary mb-3">24小时在线，最快30分钟接单上门</div>
-    <a class="btn btn-sm btn-primary" href="{{ url_for('elder_create') if current_user.is_authenticated else url_for('login') }}">立即预约</a>
-  </div></div>
-  {% endif %}
 
-  <div class="col-md-4"><div class="card p-4 feature">
-    <div class="d-flex align-items-center mb-2"><i class="bi bi-shield-check me-2"></i><h5 class="mb-0">安全保障</h5></div>
-    <div class="text-secondary mb-3">全程保险保障，服务过程可追溯</div>
-    <a class="btn btn-sm btn-outline-warning" href="{{ url_for('safety') }}">了解详情</a>
-  </div></div>
-</div>
 
-<h5 class="section-title my-3">核心创新功能</h5>
-<div class="row g-3 mb-4">
-  <div class="col-md-3"><div class="card p-3 text-center">
-    <i class="bi bi-journal-text text-primary mb-2" style="font-size: 2rem;"></i>
-    <div class="fw-semibold">共享护理日志</div>
-    <div class="small text-secondary">所有相关人员可查看完整护理记录</div>
-  </div></div>
-  <div class="col-md-3"><div class="card p-3 text-center">
-    <i class="bi bi-arrow-left-right text-primary mb-2" style="font-size: 2rem;"></i>
-    <div class="fw-semibold">任务交接机制</div>
-    <div class="small text-secondary">未完成任务自动暴露给其他护工</div>
-  </div></div>
-  <div class="col-md-3"><div class="card p-3 text-center">
-    <i class="bi bi-bar-chart text-primary mb-2" style="font-size: 2rem;"></i>
-    <div class="fw-semibold">可视化图表</div>
-    <div class="small text-secondary">护理时间数据可视化展示</div>
-  </div></div>
-  <div class="col-md-3"><div class="card p-3 text-center">
-    <i class="bi bi-eye text-primary mb-2" style="font-size: 2rem;"></i>
-    <div class="fw-semibold">信息透明化</div>
-    <div class="small text-secondary">护工信息全面透明可查</div>
-  </div></div>
-</div>
 
-  <div class="row g-4 mt-1">
-  <div class="col-lg-8">
-    <h5 class="section-title">服务项目</h5>
-    <div class="row g-3">
-      {% set colors = ['linear-gradient(90deg,#ffd166,#ff7a59)','linear-gradient(90deg,#1e6fff,#2fa66a)','linear-gradient(90deg,#8f7af6,#ff7a59)','linear-gradient(90deg,#4dd0e1,#1e6fff)'] %}
-      {% for box in services %}
-      {% set c = colors[loop.index0 % colors|length] %}
-      <div class="col-md-6"><div class="card p-3">
-        <div class="d-flex align-items-center mb-2">
-          <span class="me-2" style="display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:10px;background:{{ c }};color:#fff;">
-            <i class="bi {{ box.icon }}" style="font-size:1.1rem"></i>
-          </span>
-          <div class="fw-semibold" style="font-family: 'Merriweather', serif;">{{ box.title }}</div>
-        </div>
-        <ul class="list-dot text-secondary small mb-0">
-          {% for li in box['items'] %}<li>{{ li }}</li>{% endfor %}
-        </ul>
-      </div></div>
-      {% endfor %}
-    </div>
-  </div>
-  <div class="col-lg-4">
-    <h5 class="section-title">平台数据</h5>
-    <div class="card p-3 stat-card">
-      <div class="d-flex justify-content-between align-items-center border-bottom py-2">
-        <div>已服务用户</div><div class="badge text-bg-primary">1,234</div>
-      </div>
-      <div class="d-flex justify-content-between align-items-center border-bottom py-2">
-        <div>在岗护工</div><div class="badge text-bg-success">89</div>
-      </div>
-      <div class="d-flex justify-content-between align-items-center border-bottom py-2">
-        <div>完成订单</div><div class="badge text-bg-warning">5,678</div>
-      </div>
-      <div class="d-flex justify-content-between align-items-center py-2">
-        <div>平均响应时间</div><div class="badge text-bg-danger">25分钟</div>
-      </div>
-    </div>
-  </div>
-</div>
 
-<h5 class="section-title my-3">最新护理订单</h5>
-<div class="row g-3">
-  {% for o in latest_orders %}
-  <div class="col-md-4"><div class="card p-3 h-100">
-    <div class="small text-secondary">发布者：{{ o.elder_name }}</div>
-    <div class="fw-semibold mt-1">{{ o.title }}</div>
-    <div class="small text-secondary">需：{{ o.skills_required }}</div>
-    <div class="d-flex justify-content-between align-items-center mt-2">
-      <span class="status-badge status-{{ o.status }}">{{ {'open':'待接单','in_progress':'进行中','completed':'已完成','handover':'待接手'}[o.status] }}</span>
-      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('order_detail', order_id=o.id) }}">详情</a>
-    </div>
-  </div></div>
-  {% else %}
-  <div class="text-secondary">暂无订单</div>
-  {% endfor %}
-</div>
-{% endblock %}
-"""
-
-LOGIN = """
-{% extends 'BASE' %}
-{% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-5"><div class="card p-4">
-    <h5 class="text-primary mb-3">登录 护理智联</h5>
-    <form method="post">
-      <div class="mb-3"><label class="form-label">邮箱</label><input class="form-control" name="email" type="email" required></div>
-      <div class="mb-3"><label class="form-label">密码</label><input class="form-control" name="password" type="password" required></div>
-      <button class="btn btn-primary w-100">登录</button>
-    </form>
-    <div class="small mt-2 text-secondary">没有账号？<a href="{{ url_for('register') }}">注册</a></div>
-  </div></div>
-</div>
-{% endblock %}
-"""
 
 REGISTER = """
 {% extends 'BASE' %}
@@ -411,99 +318,6 @@ function t(){ wExtra.style.display = roleSel.value==='worker' ? 'flex':'none'; }
 {% endblock %}
 """
 
-ORDER_DETAIL = """
-{% extends 'BASE' %}
-{% block content %}
-<div class="card p-4">
-  <h5 class="mb-1">{{ o.title }}</h5>
-  <div class="text-secondary small">发布者：{{ display_name(elder) }}</div>
-  <div class="text-secondary small">需求：{{ o.skills_required or '—' }}</div>
-  <div class="mt-2">{{ o.description }}</div>
-  <div class="mt-3">
-    <span class="status-badge status-{{ o.status }}">{{ {'open':'待接单','in_progress':'进行中','completed':'已完成','handover':'待接手'}[o.status] }}</span>
-  {% if w %}<span class="badge rounded-pill text-bg-primary ms-2">护工：{{ display_name(w) }}</span>{% endif %}
-  </div>
-  {% if o.handover_notes %}
-  <div class="alert alert-warning mt-3">
-    <strong>交接备注：</strong>{{ o.handover_notes }}
-  </div>
-  {% endif %}
-</div>
-<div class="row g-3 mt-3">
-  <div class="col-md-4">
-    <div class="card p-3">
-      <div class="fw-semibold mb-2">责任保险</div>
-      <div class="small text-secondary">本订单支持商业责任险，理赔渠道透明。若需理赔请联系客服。</div>
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="card p-3">
-      <div class="fw-semibold mb-2">交接记录</div>
-      <div class="small text-secondary">以下为交接摘要（占位）：</div>
-      <ul class="small text-secondary mt-2">
-        <li>2026-02-10 10:00：李护工 完成早间护理</li>
-        <li>2026-02-11 18:20：肖护工 交接并补充用药记录</li>
-      </ul>
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="card p-3">
-      <div class="fw-semibold mb-2">相关证书</div>
-      <div class="small text-secondary">护工证书与培训记录（占位图）：</div>
-      <div class="d-flex gap-2 mt-2">
-        <div class="badge bg-light text-dark">身份证</div>
-        <div class="badge bg-light text-dark">从业证</div>
-        <div class="badge bg-light text-dark">急救证</div>
-      </div>
-    </div>
-  </div>
-</div>
-<!-- 可视化区域：护理时长时序与护工时长占比 -->
-<div class="row g-3 mt-4">
-  <div class="col-md-8">
-    <div class="card p-3">
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <div class="fw-semibold">护理时长趋势（按日统计）</div>
-        <div class="small text-secondary">单位：分钟</div>
-      </div>
-      <div class="chart-wrap position-relative">
-        <canvas id="durationsChart" height="160" class="lazy-chart" data-order-id="{{ o.id }}"></canvas>
-        <div class="chart-overlay" id="durationsChart-overlay">加载中...</div>
-        <div class="chart-loader" id="durationsChart-loader"></div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="card p-3">
-      <div class="fw-semibold mb-2">护工时长占比</div>
-      <div class="chart-wrap position-relative">
-        <canvas id="workerShareChart" height="160" class="lazy-chart" data-order-id="{{ o.id }}"></canvas>
-        <div class="chart-overlay d-none" id="workerShareChart-overlay">暂无数据</div>
-        <div class="chart-loader d-none" id="workerShareChart-loader"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- 懒加载钩子：当画布进入视口时加载静态脚本（只注入一次） -->
-<script>
-  window.ORDER_PAYLOAD = { orderId: {{ o.id }} };
-  (function(){
-    // 观察任意具有 .lazy-chart 的元素
-    const toLoad = document.querySelectorAll('.lazy-chart');
-    if(!toLoad.length) return;
-    const loadOnce = ()=>{
-      if(window.__analytics_loaded) return; window.__analytics_loaded = true;
-      const s = document.createElement('script'); s.src = '/static/js/analytics.js'; s.defer = true; document.body.appendChild(s);
-    };
-    const obs = new IntersectionObserver((entries)=>{
-      for(const e of entries){ if(e.isIntersecting){ loadOnce(); obs.disconnect(); break; } }
-    }, {rootMargin: '200px'});
-    toLoad.forEach(n=>obs.observe(n));
-  })();
-</script>
-{% endblock %}
-"""
 
 WORKER_PROFILE = """
 {% extends 'BASE' %}
@@ -546,11 +360,31 @@ WORKER_ORDERS = """
     <div class="small text-secondary">需：{{ o.skills_required }}</div>
     <div class="d-flex gap-2 mt-2">
       <a class="btn btn-sm btn-outline-primary" href="{{ url_for('worker_log', order_id=o.id) }}">记录日志</a>
+      <button type="button" class="btn btn-sm btn-outline-dark js-order-brief-btn" data-order-id="{{ o.id }}">30秒摘要+待办</button>
       <form method="post" action="{{ url_for('worker_handover', order_id=o.id) }}"><button class="btn btn-sm btn-outline-warning">标记待接手</button></form>
       <form method="post" action="{{ url_for('worker_complete', order_id=o.id) }}"><button class="btn btn-sm btn-success">完成订单</button></form>
     </div>
   </div></div>
 {% else %}<div class="text-secondary">暂无进行中的订单</div>{% endfor %}
+</div>
+
+<h5 class="mt-4 mb-2">我申请的订单</h5>
+<div class="row g-3">
+{% for o in applied_orders %}
+  <div class="col-md-6"><div class="card p-3">
+    <div class="d-flex justify-content-between">
+      <div class="fw-semibold">{{ o.title }}</div>
+      <span class="badge text-bg-warning">申请中</span>
+    </div>
+    <div class="small text-secondary">老人：{{ o.elder_name }}</div>
+    <div class="small text-secondary">需：{{ o.skills_required }}</div>
+    <div class="small text-secondary">价：{{ o.acceptable_price_range or '未设置' }} 元/小时</div>
+    <div class="mt-2">
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('order_detail', order_id=o.id) }}">详情</a>
+      <button type="button" class="btn btn-sm btn-outline-dark js-order-brief-btn" data-order-id="{{ o.id }}">30秒摘要+待办</button>
+    </div>
+  </div></div>
+{% else %}<div class="text-secondary">暂无申请中的订单</div>{% endfor %}
 </div>
 
 <h5 class="mt-4 mb-2">历史接单</h5>
@@ -561,6 +395,7 @@ WORKER_ORDERS = """
     <div class="small text-secondary">状态：{{ {'open':'待接单','in_progress':'进行中','completed':'已完成','handover':'待接手'}[o.status] }}</div>
     <div class="mt-2">
       <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('order_detail', order_id=o.id) }}">详情</a>
+      <button type="button" class="btn btn-sm btn-outline-dark js-order-brief-btn" data-order-id="{{ o.id }}">30秒摘要+待办</button>
       <a class="btn btn-sm btn-outline-info" href="{{ url_for('elder_logs', order_id=o.id) }}">查看日志</a>
     </div>
   </div></div>
@@ -582,13 +417,16 @@ WORKER_AVAILABLE_ORDERS = """
     </div>
     <div class="small text-secondary">老人：{{ o.elder_name }}</div>
     <div class="small text-secondary">需：{{ o.skills_required }}</div>
+    <div class="small text-secondary">价：{{ o.acceptable_price_range or '未设置' }} 元/小时</div>
     {% if o.handover_notes %}
     <div class="alert alert-warning small py-1 my-2">
       <strong>交接备注：</strong>{{ o.handover_notes }}
     </div>
     {% endif %}
+    <div class="small text-warning mt-2"><i class="bi bi-exclamation-circle"></i> 接单/接手前请先阅读“30秒摘要+待办清单”</div>
     <form class="mt-2" method="post" action="{{ url_for('worker_accept', order_id=o.id) }}">
-      <button class="btn btn-sm btn-primary">接单</button>
+      <button class="btn btn-sm btn-primary" {% if o.applied %}disabled{% endif %}>{{ '申请中' if o.applied else '申请接单' }}</button>
+      <button type="button" class="btn btn-sm btn-outline-dark js-order-brief-btn" data-order-id="{{ o.id }}">30秒摘要+待办</button>
       <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('order_detail', order_id=o.id) }}">详情</a>
       <a class="btn btn-sm btn-outline-info" href="{{ url_for('worker_preview_logs', order_id=o.id) }}">查看历史日志</a>
     </form>
@@ -598,68 +436,13 @@ WORKER_AVAILABLE_ORDERS = """
 {% endblock %}
 """
 
-# 新增：护工公开页面模板（确保在引用前定义，避免 NameError）
-WORKER_PUBLIC = """
-{% extends 'BASE' %}
-{% block content %}
-<div class="card p-4">
-  <div class="d-flex justify-content-between align-items-start">
-    <div>
-      <div class="fs-4 fw-semibold">{{ w.name }}</div>
-      <div class="small text-secondary">评分：
-        {% for i in range(1,6) %}
-          {% if (w.rating or 0) >= i %}
-            <i class="bi bi-star-fill text-warning"></i>
-          {% elif (w.rating or 0) >= i-0.5 %}
-            <i class="bi bi-star-half text-warning"></i>
-          {% else %}
-            <i class="bi bi-star text-muted"></i>
-          {% endif %}
-        {% endfor %}
-        · {{ w.phone or '未公开' }}</div>
-    </div>
-    <div class="text-end">
-      <div class="fw-semibold text-primary">¥{{ '%.0f'|format(w.price_per_hour or 0) }}/小时</div>
-    </div>
-  </div>
 
-  <hr class="my-3">
-  <div class="mb-2"><strong>专业技能</strong></div>
-  <div class="text-secondary">{{ w.skills_display or '未填写' }}</div>
 
-  <div class="mt-3">
-    <div class="fw-semibold mb-2">证书与培训</div>
-    <div class="d-flex gap-2">
-      <div class="card p-2 text-center" style="min-width:120px"><div class="fw-semibold">从业证</div><div class="small text-secondary">已认证</div></div>
-      <div class="card p-2 text-center" style="min-width:120px"><div class="fw-semibold">急救证</div><div class="small text-secondary">已完成</div></div>
-    </div>
-  </div>
 
-  <div class="mt-3 d-flex gap-2">
-    <a class="btn btn-primary" href="{{ url_for('index') }}">返回首页</a>
-    {% if current_user.is_authenticated and current_user.role == 'family' %}
-      <a class="btn btn-outline-primary" href="{{ url_for('family_overview') }}">查看绑定老人概览</a>
-    {% endif %}
-    {% if current_user.is_authenticated and current_user.role == 'elder' %}
-      <a class="btn btn-sm btn-outline-secondary" href="#" onclick="alert('请在对应订单页面对护工进行评分');return false;">评价护工</a>
-    {% endif %}
-  </div>
-</div>
-{% endblock %}
-"""
 
-# 保底：如果因编辑顺序或未保存导致 WORKER_PUBLIC 不存在，使用此简易模板避免 NameError
-if 'WORKER_PUBLIC' not in globals():
-    WORKER_PUBLIC = """
-    {% extends 'BASE' %}
-    {% block content %}
-    <div class="card p-4">
-      <div class="fs-4 fw-semibold">护工信息</div>
-      <div class="text-secondary">该页面模板暂不可用，请重启服务或联系管理员。</div>
-      <div class="mt-3"><a class="btn btn-primary" href="{{ url_for('index') }}">返回首页</a></div>
-    </div>
-    {% endblock %}
-    """
+
+
+
 
 def _seeded_rng(seed):
     import random
@@ -706,6 +489,338 @@ def _order_synth_durations(order_id, status, elder_id=0, days=14):
                 minutes = max(25, min(110, minutes))
             synth.append({"date": str(d), "minutes": minutes})
     return synth
+
+
+def _parse_price_range(range_text):
+    try:
+        if not range_text or '-' not in str(range_text):
+            return None, None
+        a, b = str(range_text).split('-', 1)
+        lo, hi = float(a.strip()), float(b.strip())
+        if lo > hi:
+            lo, hi = hi, lo
+        return lo, hi
+    except Exception:
+        return None, None
+
+
+def _price_match_score(worker_price, range_text):
+    lo, hi = _parse_price_range(range_text)
+    if lo is None or hi is None:
+        return 60.0
+    mid = (lo + hi) / 2.0
+    half = max(10.0, (hi - lo) / 2.0)
+    p = float(worker_price or mid)
+    dist = abs(p - mid)
+    score = 100.0 - (dist / (half + 40.0)) * 100.0
+    return max(35.0, min(100.0, score))
+
+
+def _hospital_authority_score(hospital_name, has_proof):
+    if not hospital_name:
+        return 45.0 if has_proof else 35.0
+    name = str(hospital_name)
+    top = ['北京大学第三医院', '首都医科大学附属北京朝阳医院']
+    strong_kw = ['北京大学', '协和', '华西', '瑞金', '同济', '三甲', '附属']
+    if any(t in name for t in top):
+        return 96.0
+    if any(k in name for k in strong_kw):
+        return 86.0 if has_proof else 78.0
+    return 72.0 if has_proof else 62.0
+
+
+def _simple_skill_match(order_skills, worker_skills):
+    req = {s.strip() for s in (order_skills or '').split(',') if s.strip()}
+    own = {s.strip() for s in (worker_skills or '').split(',') if s.strip()}
+    if not req:
+        return 65.0
+    inter = len(req.intersection(own))
+    return max(35.0, min(100.0, 100.0 * inter / max(1, len(req))))
+
+
+def _rank_applicants_with_ai(order_obj, candidates):
+    """候选人排序：优先评分/权威/价格，技能匹配权重较小。"""
+    if not candidates:
+        return [], "暂无候选护工"
+
+    for c in candidates:
+        c["base_score"] = (
+            0.38 * c["rating_avg"] +
+            0.30 * c["authority_score"] +
+            0.25 * c["price_match_score"] +
+            0.07 * c["skill_match_score"]
+        )
+
+    fallback_sorted = sorted(candidates, key=lambda x: x["base_score"], reverse=True)
+    fallback_reason = (
+        f"综合评分、医院权威背书与价格匹配度，推荐 {fallback_sorted[0]['display_name']} 优先接单。"
+    )
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key="sk-259952b41ae24b1e80c26ceaba58f778", base_url="https://api.deepseek.com")
+        payload = {
+            "order": {
+                "id": order_obj.id,
+                "title": order_obj.title,
+                "description": order_obj.description or "",
+                "skills_required": order_obj.skills_required or "",
+                "acceptable_price_range": getattr(order_obj, "acceptable_price_range", None) or ""
+            },
+            "candidates": [
+                {
+                    "worker_id": c["worker_id"],
+                    "worker_name": c["display_name"],
+                    "rating_avg": round(c["rating_avg"], 2),
+                    "authority_score": round(c["authority_score"], 2),
+                    "price_match_score": round(c["price_match_score"], 2),
+                    "skill_match_score": round(c["skill_match_score"], 2),
+                    "hospital_name": c["hospital_name"] or "",
+                    "skills_display": c["skills_display"] or "",
+                    "price_per_hour": c["price_per_hour"] or 0
+                } for c in candidates
+            ]
+        }
+        prompt = (
+            "你是护理平台的派单评估助手。请根据输入的 order 与 candidates 做排序。"
+            "权重要求：评分/医院权威/价格匹配是主导，技能匹配权重较小。"
+            "请输出 JSON：{\"ranking\":[{\"worker_id\":1,\"score\":88.5}],\"top_reason\":\"...\"}。"
+            "top_reason 请明确提及：评分、医院权威、价格匹配，并简要提一嘴技能匹配。"
+            "禁止输出 markdown。输入数据如下：\n" + json.dumps(payload, ensure_ascii=False)
+        )
+        resp = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
+        )
+        txt = (resp.choices[0].message.content or "").replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(txt)
+        ranked_ids = [int(x.get("worker_id")) for x in parsed.get("ranking", []) if x.get("worker_id") is not None]
+        rank_pos = {wid: i for i, wid in enumerate(ranked_ids)}
+        ai_sorted = sorted(
+            candidates,
+            key=lambda x: (rank_pos.get(x["worker_id"], 10**6), -x["base_score"])
+        )
+        top_reason = parsed.get("top_reason") or fallback_reason
+        return ai_sorted, top_reason
+    except Exception:
+        return fallback_sorted, fallback_reason
+
+
+def _build_need_counts(orders):
+    counts = defaultdict(int)
+    aliases = {
+        "翻身": ["翻身"],
+        "测血压": ["测血压", "血压"],
+        "康复训练": ["康复训练", "康复"],
+        "喂药": ["喂药", "用药", "给药"],
+        "测血糖": ["测血糖", "血糖"],
+        "陪伴": ["陪伴", "聊天", "慰藉"],
+        "洗澡": ["洗澡", "助浴", "擦洗"],
+        "换药": ["换药", "换贴", "贴膏药", "伤口护理"],
+        "吸痰": ["吸痰"],
+        "导管护理": ["导管", "导尿"],
+        "急救与复苏": ["急救", "复苏", "心肺复苏"],
+        "辅助步行": ["下地走路", "步行", "行走", "走路"],
+        "膝盖扭伤护理": ["半月板扭伤", "膝盖扭伤", "扭伤"]
+    }
+    def norm_text(s):
+        return re.sub(r"\s+", "", (s or "").replace("，", ",").replace("。", ","))
+    def normalize_label(part):
+        p = norm_text(part)
+        if not p:
+            return None
+        for label, kws in aliases.items():
+            if any(k in p for k in kws):
+                return label
+        # 只保留结构化技能词，不把自由文本原句放进图表
+        for s in SKILL_CHOICES:
+            if norm_text(s) == p:
+                return s
+        return None
+    for o in orders:
+        combined = f"{getattr(o, 'skills_required', '') or ''},{getattr(o, 'description', '') or ''}"
+        text_all = norm_text(combined)
+        for k, kws in aliases.items():
+            if any(norm_text(kw) in text_all for kw in kws):
+                counts[k] += 1
+        for part in text_all.split(","):
+            label = normalize_label(part)
+            if label:
+                counts[label] += 1
+    items = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+    top = items[:12]
+    return [x[0] for x in top], [x[1] for x in top]
+
+
+def _deepseek_json(prompt, fallback=None):
+    """Use raw HTTPS to call DeepSeek, avoiding external SDK dependency."""
+    api_key = "sk-259952b41ae24b1e80c26ceaba58f778"
+    body = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt}],
+        "response_format": {"type": "json_object"}
+    }
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.deepseek.com/chat/completions",
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        },
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=35) as resp:
+            raw = resp.read().decode("utf-8")
+        payload = json.loads(raw)
+        content = payload["choices"][0]["message"]["content"]
+        return json.loads(content.replace("```json", "").replace("```", "").strip())
+    except Exception:
+        return fallback if fallback is not None else {}
+
+
+def _build_admin_report_payload(db):
+    workers = db.query(User).filter(User.role == "worker").all()
+    elders = db.query(User).filter(User.role == "elder").all()
+    families = db.query(User).filter(User.role == "family").all()
+    orders = db.query(Order).order_by(Order.id.desc()).all()
+    logs = db.query(CareLog).order_by(CareLog.created_at.desc()).limit(200).all()
+
+    elder_alias = {}
+    for idx, e in enumerate(sorted(elders, key=lambda x: x.id), start=1):
+        elder_alias[e.id] = f"老人{chr(ord('A') + idx - 1)}" if idx <= 26 else f"老人{idx}"
+
+    need_labels, need_values = _build_need_counts(orders)
+    worker_payload = [{
+        "id": w.id,
+        "name": format_display_name(w.name, "worker"),
+        "price_per_hour": w.price_per_hour,
+        "rating": w.rating,
+        "skills": w.skills_display,
+        "hospital_name": getattr(w, "hospital_name", None)
+    } for w in workers]
+    elder_payload = [{
+        "alias": elder_alias.get(e.id, "老人X"),
+        "order_count": sum(1 for o in orders if o.elder_id == e.id)
+    } for e in elders]
+    family_payload = [{
+        "id": f.id,
+        "name": format_display_name(f.name, "family"),
+        "bound_elder": elder_alias.get(getattr(f, "bound_elder_id", None), "未绑定")
+    } for f in families]
+    order_payload = [{
+        "id": o.id,
+        "elder_alias": elder_alias.get(o.elder_id, "老人X"),
+        "title": o.title,
+        "skills_required": o.skills_required,
+        "description": o.description,
+        "acceptable_price_range": getattr(o, "acceptable_price_range", None),
+        "status": o.status
+    } for o in orders]
+    log_payload = [{
+        "order_id": l.order_id,
+        "duration_minutes": l.duration_minutes,
+        "content": l.content
+    } for l in logs]
+    return {
+        "workers": workers,
+        "elders": elders,
+        "families": families,
+        "orders": orders,
+        "need_labels": need_labels,
+        "need_values": need_values,
+        "worker_payload": worker_payload,
+        "elder_payload": elder_payload,
+        "family_payload": family_payload,
+        "order_payload": order_payload,
+        "log_payload": log_payload
+    }
+
+
+def _generate_admin_report(data):
+    need_labels = data["need_labels"]
+    need_values = data["need_values"]
+    worker_payload = data["worker_payload"]
+    family_payload = data["family_payload"]
+    prompt = (
+        "你是医疗护理平台运营分析专家。请基于输入 JSON 生成专业报告，输出严格 JSON。"
+        "必须包含字段：worker_insight, elder_insight, family_insight, supply_demand_insight, risk_insight, suggestions。"
+        "要求：elder_insight 中不得出现任何真实姓名，只能使用给定 alias。"
+        "重点分析护理需求结构与技能供给匹配，面向调研机构，语言专业。"
+        "每个字段给出2-5条要点。输入如下：\n" + json.dumps({
+            "workers": data["worker_payload"],
+            "elders": data["elder_payload"],
+            "families": data["family_payload"],
+            "orders": data["order_payload"],
+            "logs": data["log_payload"],
+            "need_labels": need_labels,
+            "need_values": need_values
+        }, ensure_ascii=False)
+    )
+    fallback = {
+        "worker_insight": [
+            f"当前护工共 {len(worker_payload)} 人，已形成不同价格与技能层级。",
+            "高评分护工集中在具备医院标签与完整技能档案人群。"
+        ],
+        "elder_insight": [
+            "老人侧订单需求以基础生活照料与体征监测为主。",
+            "部分订单存在复合需求（如翻身+测血压+康复训练），需要中高阶护工覆盖。"
+        ],
+        "family_insight": [
+            f"家属端用户共 {len(family_payload)} 人，绑定老人比例对活跃度影响明显。",
+            "家属更关注可视化日志与即时反馈，倾向选择评分更稳定的护工。"
+        ],
+        "supply_demand_insight": [
+            "需求侧高频项与供给侧技能存在阶段性错配，建议加大高频技能培训。",
+            "价格区间中段订单最集中，建议优化中段价格带护工供给。"
+        ],
+        "risk_insight": [
+            "个别需求标签描述不标准，影响匹配精度。",
+            "医院标签未完成绑定的护工在高信任场景下转化率偏低。"
+        ],
+        "suggestions": [
+            "建立按需求标签分层的护工培训与激励机制。",
+            "完善订单需求结构化录入，减少自由文本歧义。",
+            "对高频护理需求设置平台重点保障池。"
+        ]
+    }
+    return _deepseek_json(prompt, fallback=fallback)
+
+
+def _admin_report_to_markdown(report, need_labels, need_values, workers, elders, families, orders):
+    def section(title, items):
+        items = items if isinstance(items, list) else ([items] if items else [])
+        body = "\n".join([f"- {x}" for x in items]) if items else "- 无"
+        return f"## {title}\n{body}\n"
+
+    need_table = "\n".join([f"| {need_labels[i]} | {need_values[i]} |" for i in range(len(need_labels))]) or "| 无 | 0 |"
+    top_needs = ", ".join([f"{need_labels[i]}({need_values[i]})" for i in range(min(8, len(need_labels)))]) or "无"
+    text = f"""# 平台用户信息调研报告
+
+生成时间：{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
+
+## 平台概览
+- 护工总数：{len(workers)}
+- 老人总数：{len(elders)}
+- 家属总数：{len(families)}
+- 订单总数：{len(orders)}
+- 高频护理需求（Top）：{top_needs}
+
+## 护理需求统计表
+| 需求标签 | 频次 |
+|---|---|
+{need_table}
+
+{section("护工端洞察", report.get("worker_insight"))}
+{section("老人端洞察（匿名）", report.get("elder_insight"))}
+{section("家属端洞察", report.get("family_insight"))}
+{section("供需结构洞察", report.get("supply_demand_insight"))}
+{section("风险提示", report.get("risk_insight"))}
+{section("运营建议", report.get("suggestions"))}
+"""
+    return text
 
 
 # -------------------- API -----------------------
@@ -849,7 +964,6 @@ def api_order_ai_report(order_id):
 {chr(10).join(log_texts)}
 
 请严格按以下JSON格式返回，不要包含任何Markdown标记（不要输出```json等），只要输出纯JSON对象：
-{{
   "summary": "一段对于老人健康温暖一点的文字总结",
   "suggestions": [
     "建议1（例如下次护理建议）",
@@ -886,6 +1000,70 @@ def api_order_ai_report(order_id):
         return jsonify(data)
     except Exception as e:
         return jsonify(error=str(e)), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/order/<int:order_id>/brief")
+@login_required
+def api_order_brief(order_id):
+    db = db_session()
+    try:
+        o = db.get(Order, order_id)
+        if not o:
+            return jsonify(error="订单不存在"), 404
+
+        # 已完成订单做更严格权限，其他状态按已登录用户可读摘要
+        if getattr(o, 'status', '') == 'completed':
+            can_view = (
+                o.elder_id == current_user.id or
+                o.accepted_worker_id == current_user.id or
+                (require_family() and getattr(current_user, 'bound_elder_id', None) == o.elder_id)
+            )
+            if not can_view:
+                return jsonify(error="无权限访问该订单"), 403
+
+        logs = db.query(CareLog).filter(CareLog.order_id == order_id).order_by(CareLog.created_at.desc()).limit(12).all()
+        log_text = "\n".join([
+            f"{l.created_at.strftime('%m-%d %H:%M')} | {l.duration_minutes}分钟 | {l.content}" +
+            (f" | 异常:{l.anomalies}" if l.anomalies else "")
+            for l in logs
+        ]) or "暂无护理日志。"
+
+        prompt = f"""
+你是护理任务交接助手。请根据订单和日志生成“30秒可读摘要 + 待办清单”。
+返回严格 JSON（不要 markdown）：
+  "summary": "120字以内摘要",
+  "todo": ["待办1", "待办2", "待办3"]
+}}
+
+订单标题：{o.title}
+订单状态：{o.status}
+护理需求：{o.skills_required or '无'}
+护理地址：{getattr(o, 'address', None) or '未填写'}
+描述：{o.description or ''}
+最近日志：
+{log_text}
+"""
+        fallback = {
+            "summary": "该订单当前需要持续护理跟进，请先确认老人当前状态、既往记录和交接事项，再开始执行。",
+            "todo": [
+                "阅读近三天护理日志与异常备注",
+                "核对今日护理目标（用药/训练/监测）",
+                "完成后补充护理日志并标记异常"
+            ]
+        }
+        result = _deepseek_json(prompt, fallback=fallback)
+
+        # 记录“护工已阅读摘要”，用于接单/接手前提醒
+        if require_worker():
+            seen = session.get("order_brief_seen", [])
+            if order_id not in seen:
+                seen.append(order_id)
+                session["order_brief_seen"] = seen[-50:]
+                session.modified = True
+
+        return jsonify(result)
     finally:
         db.close()
 
@@ -934,7 +1112,6 @@ def api_elder_ai_report(elder_id):
 {chr(10).join(log_texts)}
 
 请严格按以下JSON格式返回，不要包含任何Markdown标记（不要输出```json等），只要输出纯JSON对象：
-{{
   "summary": "一段对于老人健康温暖一点的文字总结",
   "suggestions": [
     "建议1（例如下次护理建议）",
@@ -978,12 +1155,28 @@ def api_elder_ai_report(elder_id):
 def api_elder_durations(elder_id):
     db = db_session()
     try:
-        labels, values, _, _ = _make_sample_data(14)
-        
-        # Merge our fake data to standard UI format. Since we do not want to break existing heatmap logic
-        result = []
-        for i, dstr in enumerate(labels):
-            result.append({"date": dstr, "minutes": values[i]})
+        if not current_user.is_authenticated:
+            return jsonify(error="未登录"), 401
+
+        can_view = False
+        if require_elder() and current_user.id == elder_id:
+            can_view = True
+        elif require_family() and getattr(current_user, 'bound_elder_id', None) == elder_id:
+            can_view = True
+        if not can_view:
+            return jsonify(error="无权限查看该老人的护理时长"), 403
+
+        rows = db.query(
+            func.date(CareLog.created_at).label('date'),
+            func.sum(CareLog.duration_minutes).label('minutes')
+        ).join(Order, CareLog.order_id == Order.id).filter(
+            Order.elder_id == elder_id
+        ).group_by('date').order_by('date').all()
+
+        result = [{"date": str(r.date), "minutes": int(r.minutes or 0)} for r in rows]
+        if not result:
+            labels, values, _, _ = _make_sample_data(14)
+            result = [{"date": d, "minutes": int(values[i] or 0)} for i, d in enumerate(labels)]
         return jsonify(result)
     finally:
         db.close()
@@ -1010,13 +1203,22 @@ def index():
                 worker_name=workers.get(o.accepted_worker_id)
             )))
         services = [
-            dict(title="生活照料", icon="bi-bag-heart", items=["助浴、助餐","翻身、拍背","个人卫生清洁"]),
-            dict(title="医疗护理", icon="bi-heart-pulse", items=["生命体征监测","药物管理","康复训练指导"]),
-            dict(title="心理慰藉", icon="bi-chat-dots", items=["陪伴聊天","心理疏导","读书读报"]),
-            dict(title="居家服务", icon="bi-house-heart", items=["环境清洁","简单家务","陪同就医"]),
+            dict(title="生活照料", icon="bi-bag-heart", color="#0d9488", bg="rgba(13, 148, 136, 0.12)", items=["助浴、助餐","翻身、拍背","个人卫生清洁"]),
+            dict(title="医疗护理", icon="bi-heart-pulse", color="#10b981", bg="rgba(16, 185, 129, 0.12)", items=["生命体征监测","药物管理","康复训练指导"]),
+            dict(title="心理慰藉", icon="bi-chat-dots", color="#8b5cf6", bg="rgba(139, 92, 246, 0.12)", items=["陪伴聊天","心理疏导","读书读报"]),
+            dict(title="居家服务", icon="bi-house-heart", color="#f59e0b", bg="rgba(245, 158, 11, 0.12)", items=["环境清洁","简单家务","陪同就医"]),
         ]
+        bound_elder = None
+        if current_user.is_authenticated and require_family() and getattr(current_user, 'bound_elder_id', None):
+            bound_elder = db.get(User, current_user.bound_elder_id)
         # render from file-based template
-        return render_template_string(open(os.path.join(os.path.dirname(__file__), 'templates', 'home.html')).read(), latest_orders=latest_orders, services=services, now=datetime.utcnow())
+        return render_template(
+            'home.html',
+            latest_orders=latest_orders,
+            services=services,
+            bound_elder=bound_elder,
+            now=datetime.utcnow()
+        )
     finally:
         db.close()
 
@@ -1252,25 +1454,149 @@ def register():
     from flask import render_template
     return render_template('register.html', skills=SKILL_CHOICES)
 
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        key = (request.form.get("admin_key") or "").strip()
+        if key == "regulate1999":
+            session["is_admin"] = True
+            flash("管理员登录成功", "success")
+            return redirect(url_for("admin_dashboard"))
+        flash("管理员密钥错误", "danger")
+    return render_template("admin_login.html")
+
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.pop("is_admin", None)
+    flash("管理员已退出", "info")
+    return redirect(url_for("index"))
+
+
+@app.route("/admin/dashboard")
+def admin_dashboard():
+    if not session.get("is_admin"):
+        return redirect(url_for("admin_login"))
+    db = db_session()
+    try:
+        workers = db.query(User).filter(User.role == "worker").order_by(User.id.asc()).all()
+        elders = db.query(User).filter(User.role == "elder").order_by(User.id.asc()).all()
+        families = db.query(User).filter(User.role == "family").order_by(User.id.asc()).all()
+        orders = db.query(Order).order_by(Order.id.desc()).all()
+        need_labels, need_values = _build_need_counts(orders)
+        return render_template(
+            "admin_dashboard.html",
+            workers=workers,
+            elders=elders,
+            families=families,
+            orders=orders,
+            need_labels=need_labels,
+            need_values=need_values
+        )
+    finally:
+        db.close()
+
+
+@app.route("/admin/risk-control")
+def admin_risk_control():
+    if not session.get("is_admin"):
+        return redirect(url_for("admin_login"))
+        
+    db = db_session()
+    try:
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        risk_orders = db.query(Order).filter(Order.current_risk_level.in_(['medium', 'high'])).order_by(Order.created_at.desc()).all()
+        
+        today_high_risk = sum(1 for o in risk_orders if o.current_risk_level == 'high' and o.created_at >= today_start)
+        saved_amount = sum(50000 if o.current_risk_level == 'high' else 10000 for o in risk_orders)
+        
+        risk_list = []
+        for o in risk_orders:
+            elder = db.get(User, o.elder_id)
+            elder_name = elder.name if elder else '未知老人'
+            risk_list.append({
+                'id': o.id,
+                'elder_name': elder_name,
+                'risk_level': o.current_risk_level,
+                'reason': o.risk_reason or '未记录明确原因'
+            })
+            
+        return render_template("admin_risk_control.html", 
+                               risk_orders=risk_list, 
+                               today_high_risk=today_high_risk,
+                               saved_amount=saved_amount)
+    finally:
+        db.close()
+
+@app.route('/admin/risk_intervene/<int:order_id>', methods=['POST'])
+def admin_risk_intervene(order_id):
+    if not session.get("is_admin"):
+        return jsonify({"status": "error", "message": "Unauthorized"}), 403
+        
+    db = db_session()
+    try:
+        order = db.get(Order, order_id)
+        if order and order.current_risk_level in ['medium', 'high']:
+            order.current_risk_level = 'low'
+            order.risk_reason = '管理员已介入并解除了警报：' + (order.risk_reason or '')
+            db.commit()
+            return jsonify({"status": "success"})
+        return jsonify({"status": "error", "message": "订单不存在或无需纠正"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+    finally:
+        db.close()
+
+
+@app.route("/admin/report", methods=["POST"])
+def admin_report():
+    if not session.get("is_admin"):
+        return jsonify(error="无管理员权限"), 403
+    db = db_session()
+    try:
+        data = _build_admin_report_payload(db)
+        report = _generate_admin_report(data)
+        need_labels, need_values = data["need_labels"], data["need_values"]
+        return jsonify(report=report, need_labels=need_labels, need_values=need_values)
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+    finally:
+        db.close()
+
+
+@app.route("/admin/report/download", methods=["POST"])
+def admin_report_download():
+    if not session.get("is_admin"):
+        return jsonify(error="无管理员权限"), 403
+    db = db_session()
+    try:
+        data = _build_admin_report_payload(db)
+        report = _generate_admin_report(data)
+        md = _admin_report_to_markdown(
+            report=report,
+            need_labels=data["need_labels"],
+            need_values=data["need_values"],
+            workers=data["workers"],
+            elders=data["elders"],
+            families=data["families"],
+            orders=data["orders"],
+        )
+        filename = f"platform_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.md"
+        resp = make_response(md)
+        resp.headers["Content-Type"] = "text/markdown; charset=utf-8"
+        resp.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return resp
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+    finally:
+        db.close()
+
 # DB 会话通过 `from db import db_session` 提供（拆分到 db.py）
 
 
-ELDER_CREATE = """
-{% extends 'BASE' %}
-{% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-8"><div class="card p-4">
-    <h5 class="mb-3">发布护理订单</h5>
-    <form method="post">
-      <div class="mb-3"><label class="form-label">标题</label><input class="form-control" name="title" required></div>
-      <div class="mb-3"><label class="form-label">需求描述</label><textarea class="form-control" name="description" rows="4" required></textarea></div>
-      <div class="mb-3"><label class="form-label">所需技能（逗号分隔）</label><input class="form-control" name="skills"></div>
-      <button class="btn btn-primary">发布</button>
-    </form>
-  </div></div>
-</div>
-{% endblock %}
-"""
+
+
 
 
 @app.route("/elder/create", methods=["GET","POST"])
@@ -1282,6 +1608,15 @@ def elder_create():
     if request.method == "POST":
         title = request.form.get("title", "").strip()
         description = request.form.get("description", "").strip()
+        acceptable_price_range = (request.form.get("acceptable_price_range") or "").strip()
+        address = (request.form.get("address") or "").strip()
+        allowed_ranges = {"20-60", "60-80", "80-100", "100-120", "120-140", "140-180"}
+        if acceptable_price_range not in allowed_ranges:
+            flash("请选择有效的可接受价格区间", "warning")
+            return redirect(url_for("elder_create"))
+        if not address:
+            flash("请填写护理地址", "warning")
+            return redirect(url_for("elder_create"))
         skills_list = request.form.getlist("skills")
         skills_other = request.form.get("skills_other", "").strip()
         if skills_other:
@@ -1289,7 +1624,14 @@ def elder_create():
         skills = ", ".join(skills_list)
         db = db_session()
         try:
-            o = Order(elder_id=current_user.id, title=title or "护理服务", description=description or "", skills_required=skills)
+            o = Order(
+                elder_id=current_user.id,
+                title=title or "护理服务",
+                description=description or "",
+                skills_required=skills,
+                acceptable_price_range=acceptable_price_range,
+                address=address
+            )
             db.add(o)
             db.commit()
             flash("发布成功","success")
@@ -1388,6 +1730,7 @@ def elder_workers():
                 name=w.name, 
                 price=w.price_per_hour, 
                 rating=w.rating, 
+                hospital_name=getattr(w, 'hospital_name', None),
                 rating_attitude=rating_attitude,
                 rating_ability=rating_ability,
                 rating_transparent=rating_transparent,
@@ -1395,6 +1738,115 @@ def elder_workers():
             )))
         from flask import render_template
         return render_template('elder_workers.html', workers=workers)
+    finally:
+        db.close()
+
+
+@app.route('/elder/applications')
+@login_required
+def elder_applications():
+    if not require_elder():
+        flash('只有老人可以查看申请排行', 'warning')
+        return redirect(url_for('index'))
+
+    db = db_session()
+    try:
+        from models import Rating
+        orders = db.query(Order).filter(Order.elder_id == current_user.id).order_by(Order.id.desc()).all()
+        order_ids = [o.id for o in orders]
+        apps = db.query(OrderApplication).filter(
+            OrderApplication.order_id.in_(order_ids),
+            OrderApplication.status == 'pending'
+        ).order_by(OrderApplication.applied_at.desc()).all() if order_ids else []
+
+        by_order = defaultdict(list)
+        for a in apps:
+            by_order[a.order_id].append(a)
+
+        workers = {w.id: w for w in db.query(User).filter(User.role == 'worker').all()}
+        rankings = []
+        for o in orders:
+            items = by_order.get(o.id, [])
+            if not items:
+                continue
+            candidates = []
+            for ap in items:
+                w = workers.get(ap.worker_id)
+                if not w:
+                    continue
+                rs = db.query(
+                    func.avg(Rating.score_attitude),
+                    func.avg(Rating.score_ability),
+                    func.avg(Rating.score_transparent)
+                ).filter(Rating.worker_id == w.id).first()
+                dims = [float(x) for x in rs if x is not None] if rs else []
+                rating_avg = sum(dims) / len(dims) if dims else float(w.rating or 4.0)
+                candidates.append({
+                    "application_id": ap.id,
+                    "worker_id": w.id,
+                    "display_name": format_display_name(w.name, 'worker'),
+                    "skills_display": w.skills_display or '',
+                    "hospital_name": getattr(w, 'hospital_name', None),
+                    "has_proof": bool(getattr(w, 'hospital_proof_path', None)),
+                    "price_per_hour": float(w.price_per_hour or 0),
+                    "rating_avg": float(rating_avg),
+                    "authority_score": _hospital_authority_score(getattr(w, 'hospital_name', None), bool(getattr(w, 'hospital_proof_path', None))),
+                    "price_match_score": _price_match_score(float(w.price_per_hour or 0), getattr(o, 'acceptable_price_range', None)),
+                    "skill_match_score": _simple_skill_match(o.skills_required, w.skills_display)
+                })
+            ranked, top_reason = _rank_applicants_with_ai(o, candidates)
+            rankings.append({
+                "order": o,
+                "candidates": ranked,
+                "top_reason": top_reason
+            })
+
+        return render_template('elder_applications.html', rankings=rankings, now=datetime.utcnow())
+    finally:
+        db.close()
+
+
+@app.route('/elder/order/<int:order_id>/accept-applicant/<int:worker_id>', methods=['POST'])
+@login_required
+def elder_accept_applicant(order_id, worker_id):
+    if not require_elder():
+        abort(403)
+    db = db_session()
+    try:
+        o = db.get(Order, order_id)
+        if not o or o.elder_id != current_user.id:
+            abort(404)
+        if o.status != 'open':
+            flash('该订单已结束申请阶段，无法再次录用', 'warning')
+            return redirect(url_for('elder_applications'))
+
+        app_row = db.query(OrderApplication).filter(
+            OrderApplication.order_id == order_id,
+            OrderApplication.worker_id == worker_id,
+            OrderApplication.status == 'pending'
+        ).first()
+        if not app_row:
+            flash('该护工未在申请中', 'warning')
+            return redirect(url_for('elder_applications'))
+
+        o.accepted_worker_id = worker_id
+        o.status = 'in_progress'
+        app_row.status = 'accepted'
+        app_row.reviewed_at = datetime.utcnow()
+        db.add(o)
+        db.add(app_row)
+
+        db.query(OrderApplication).filter(
+            OrderApplication.order_id == order_id,
+            OrderApplication.worker_id != worker_id,
+            OrderApplication.status == 'pending'
+        ).update(
+            {OrderApplication.status: 'rejected', OrderApplication.reviewed_at: datetime.utcnow()},
+            synchronize_session=False
+        )
+        db.commit()
+        flash('已录用该护工并开始执行订单', 'success')
+        return redirect(url_for('elder_orders'))
     finally:
         db.close()
 
@@ -1406,88 +1858,6 @@ def family_overview():
     return redirect(url_for('analytics'))
 
 
-ANALYTICS = """
-{% extends 'BASE' %}
-{% block content %}
-<div class="row g-3 mb-3">
-  <div class="col-md-4">
-    <div class="chart-card d-flex gap-3 align-items-center">
-      <div class="stat-icon bg-gradient-primary"><i class="bi bi-clock-history fs-4"></i></div>
-      <div>
-        <div class="small text-secondary">过去 14 天总护理时长</div>
-        <div class="fw-bold fs-4">{{ stats.total_minutes }} 分钟</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="chart-card d-flex gap-3 align-items-center">
-      <div class="stat-icon bg-gradient-accent"><i class="bi bi-people-fill fs-4"></i></div>
-      <div>
-        <div class="small text-secondary">参与护工数</div>
-        <div class="fw-bold fs-4">{{ stats.total_workers }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="chart-card d-flex gap-3 align-items-center">
-      <div class="stat-icon" style="background:linear-gradient(90deg,#1e6fff,#2fa66a)"><i class="bi bi-bar-chart-line fs-4"></i></div>
-      <div>
-        <div class="small text-secondary">日均护理时长</div>
-        <div class="fw-bold fs-4">{{ stats.avg_per_day }} 分钟</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="row g-3">
-  <div class="col-lg-8">
-    <div class="card p-3 chart-card">
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <div class="fw-semibold">近 14 天护理时长趋势</div>
-        <div class="small text-secondary">分钟 / 日</div>
-      </div>
-      <div class="chart-wrap position-relative">
-        <canvas id="lineChart" height="140"></canvas>
-        <div class="chart-overlay" id="lineChart-overlay">加载中...</div>
-        <div class="chart-loader" id="lineChart-loader"></div>
-      </div>
-    </div>
-  </div>
-  <div class="col-lg-4">
-    <div class="card p-3 chart-card">
-      <div class="fw-semibold mb-2">护工服务占比</div>
-      <div class="chart-wrap position-relative">
-        <canvas id="polarChart" height="220"></canvas>
-        <div class="chart-overlay" id="polarChart-overlay">加载中...</div>
-        <div class="chart-loader" id="polarChart-loader"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<script>
-  // 将服务端注入的数据传给静态脚本，静态脚本会在被懒加载后读取并渲染
-  window.ANALYTICS_PAYLOAD = {
-    daily_labels: {{ daily_labels|tojson }},
-    daily_values: {{ daily_values|tojson }},
-    worker_labels: {{ worker_labels|tojson }},
-    worker_values: {{ worker_values|tojson }}
-  };
-
-  // 标记页面上需要懒加载的画布
-  (function(){
-    const charts = document.querySelectorAll('#lineChart, #polarChart');
-    charts.forEach(c=>c.classList.add('lazy-chart'));
-    const toLoad = document.querySelectorAll('.lazy-chart');
-    if(!toLoad.length) return;
-    const loadOnce = ()=>{ if(window.__analytics_loaded) return; window.__analytics_loaded = true; const s=document.createElement('script'); s.src='/static/js/analytics.js'; s.defer=true; document.body.appendChild(s); };
-    const obs = new IntersectionObserver((entries)=>{ for(const e of entries){ if(e.isIntersecting){ loadOnce(); obs.disconnect(); break; } } }, {rootMargin:'200px'});
-    toLoad.forEach(n=>obs.observe(n));
-  })();
-</script>
-
-{% endblock %}
-"""
 
 
 @app.route('/analytics')
@@ -1657,11 +2027,176 @@ def analytics_public_data():
     return resp
 
 @app.route('/family/bind', methods=['GET','POST'])
+@login_required
 def family_bind():
-    if request.method == 'POST':
-        flash('绑定成功（占位）','success')
+    if not require_family():
+        flash('只有家属可以发起绑定申请', 'warning')
         return redirect(url_for('index'))
-    return rtemplate("""{% extends 'BASE' %}{% block content %}<div class='card p-4'><h5>绑定老人</h5><form method='post'><input class='form-control mb-2' name='email' placeholder='老人邮箱'><button class='btn btn-primary'>绑定</button></form></div>{% endblock %}""")
+
+    db = db_session()
+    try:
+        if request.method == 'POST':
+            elder_email = (request.form.get('email') or '').strip().lower()
+            message = (request.form.get('message') or '').strip()
+            if not elder_email:
+                flash('请输入老人邮箱', 'warning')
+                return redirect(url_for('family_bind'))
+
+            elder = db.query(User).filter(func.lower(User.email) == elder_email, User.role == 'elder').first()
+            if not elder:
+                flash('未找到该老人账号，请确认邮箱是否正确', 'warning')
+                return redirect(url_for('family_bind'))
+
+            if getattr(current_user, 'bound_elder_id', None) == elder.id:
+                flash('你已经绑定该老人账号', 'info')
+                return redirect(url_for('family_bind'))
+
+            if getattr(current_user, 'bound_elder_id', None) and current_user.bound_elder_id != elder.id:
+                flash('你已绑定其他老人，若需更换请先联系管理员解绑', 'warning')
+                return redirect(url_for('family_bind'))
+
+            existing = db.query(BindingRequest).filter(
+                BindingRequest.family_id == current_user.id,
+                BindingRequest.elder_id == elder.id,
+                BindingRequest.status == 'pending'
+            ).first()
+            if existing:
+                flash('你已向该老人发起过申请，请等待老人确认', 'info')
+                return redirect(url_for('family_bind'))
+
+            req = BindingRequest(
+                family_id=current_user.id,
+                elder_id=elder.id,
+                status='pending',
+                message=message or None
+            )
+            db.add(req)
+            db.commit()
+            flash('绑定申请已发送，请等待老人确认', 'success')
+            return redirect(url_for('family_bind'))
+
+        bound_elder = None
+        if getattr(current_user, 'bound_elder_id', None):
+            bound_elder = db.get(User, current_user.bound_elder_id)
+
+        reqs = db.query(BindingRequest).filter(
+            BindingRequest.family_id == current_user.id
+        ).order_by(BindingRequest.created_at.desc()).limit(10).all()
+        elder_ids = [r.elder_id for r in reqs]
+        elders = {u.id: u for u in db.query(User).filter(User.id.in_(elder_ids)).all()} if elder_ids else {}
+
+        return render_template('family_bind.html', bound_elder=bound_elder, requests=reqs, elders=elders)
+    finally:
+        db.close()
+
+
+@app.route('/elder/bind-requests')
+@login_required
+def elder_bind_requests():
+    if not require_elder():
+        flash('只有老人可以查看绑定申请', 'warning')
+        return redirect(url_for('index'))
+
+    db = db_session()
+    try:
+        requests = db.query(BindingRequest).filter(
+            BindingRequest.elder_id == current_user.id
+        ).order_by(BindingRequest.created_at.desc()).all()
+        families = {u.id: u for u in db.query(User).filter(User.role == 'family').all()}
+        return render_template('elder_bind_requests.html', requests=requests, families=families)
+    finally:
+        db.close()
+
+
+@app.route('/elder/bind-requests/<int:request_id>/accept', methods=['POST'])
+@login_required
+def elder_accept_bind_request(request_id):
+    if not require_elder():
+        abort(403)
+
+    db = db_session()
+    try:
+        req = db.get(BindingRequest, request_id)
+        if not req or req.elder_id != current_user.id:
+            abort(404)
+        if req.status != 'pending':
+            flash('该申请已处理', 'info')
+            return redirect(url_for('elder_bind_requests'))
+
+        family = db.get(User, req.family_id)
+        if not family or family.role != 'family':
+            flash('申请对应的家属账号不存在', 'warning')
+            return redirect(url_for('elder_bind_requests'))
+
+        family.bound_elder_id = current_user.id
+        req.status = 'accepted'
+        req.responded_at = datetime.utcnow()
+        db.add(family)
+        db.add(req)
+
+        db.query(BindingRequest).filter(
+            BindingRequest.family_id == family.id,
+            BindingRequest.id != req.id,
+            BindingRequest.status == 'pending'
+        ).update(
+            {
+                BindingRequest.status: 'rejected',
+                BindingRequest.responded_at: datetime.utcnow()
+            },
+            synchronize_session=False
+        )
+        db.commit()
+        flash('已接受绑定申请，家属现在可以代为登录老人账号', 'success')
+        return redirect(url_for('elder_bind_requests'))
+    finally:
+        db.close()
+
+
+@app.route('/elder/bind-requests/<int:request_id>/reject', methods=['POST'])
+@login_required
+def elder_reject_bind_request(request_id):
+    if not require_elder():
+        abort(403)
+
+    db = db_session()
+    try:
+        req = db.get(BindingRequest, request_id)
+        if not req or req.elder_id != current_user.id:
+            abort(404)
+        if req.status == 'pending':
+            req.status = 'rejected'
+            req.responded_at = datetime.utcnow()
+            db.add(req)
+            db.commit()
+            flash('已拒绝该绑定申请', 'info')
+        else:
+            flash('该申请已处理', 'info')
+        return redirect(url_for('elder_bind_requests'))
+    finally:
+        db.close()
+
+
+@app.route('/family/login-elder', methods=['POST'])
+@login_required
+def family_login_elder():
+    if not require_family():
+        abort(403)
+    elder_id = getattr(current_user, 'bound_elder_id', None)
+    if not elder_id:
+        flash('你还没有绑定老人账号', 'warning')
+        return redirect(url_for('family_bind'))
+
+    db = db_session()
+    try:
+        elder = db.get(User, elder_id)
+        if not elder or elder.role != 'elder':
+            flash('绑定的老人账号无效，请重新绑定', 'warning')
+            return redirect(url_for('family_bind'))
+        login_user(elder)
+        flash('已切换到老人账号', 'success')
+        return redirect(url_for('index'))
+    finally:
+        db.close()
 
 @app.route('/worker/log/<int:order_id>', methods=['GET','POST'])
 def worker_log(order_id):
@@ -1680,9 +2215,57 @@ def worker_log(order_id):
       duration = int(request.form.get('duration') or 0)
       content = request.form.get('content','').strip()
       anomalies = request.form.get('anomalies','').strip()
-      cl = CareLog(order_id=order_id, worker_id=current_user.id, content=content or '无', anomalies=anomalies or None, duration_minutes=duration)
+      photo = request.files.get('photo')
+      photo_path = None
+      if photo and photo.filename and _allowed_log_photo(photo.filename):
+        os.makedirs(LOG_UPLOAD_FOLDER, exist_ok=True)
+        ext = photo.filename.rsplit('.', 1)[1].lower()
+        fn = secure_filename(f"log_{order_id}_{current_user.id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.{ext}")
+        path = os.path.join(LOG_UPLOAD_FOLDER, fn)
+        photo.save(path)
+        photo_path = f"log_uploads/{fn}"
+      health_skin = request.form.get('health_skin', '正常')
+      health_mobility = request.form.get('health_mobility', '平稳')
+      health_digestion = request.form.get('health_digestion', '正常')
+      health_mental = request.form.get('health_mental', '清醒')
+
+      cl = CareLog(
+          order_id=order_id, 
+          worker_id=current_user.id, 
+          content=content or '无', 
+          anomalies=anomalies or None, 
+          duration_minutes=duration, 
+          photo_path=photo_path,
+          health_skin=health_skin,
+          health_mobility=health_mobility,
+          health_digestion=health_digestion,
+          health_mental=health_mental
+      )
       db.add(cl)
       db.commit()
+
+      # 调用 DeepSeek 进行风险评估
+      prompt = f"""
+你是一个专业的居家养老风险评估助手。请根据护工刚刚提交的护理日志和核心生活指标，评估该老人的当前重症/住院风险等级。
+护工记录内容：{content}
+异常备注：{anomalies or '无'}
+1. 皮肤与体表：{health_skin}
+2. 行动与跌倒：{health_mobility}
+3. 进食与排泄：{health_digestion}
+4. 精神与意识：{health_mental}
+
+请严格输出 JSON 格式，包含两个字段：
+- "level": 风险等级，只能是 "low", "medium", "high" 之一。如果所有指标都是正常/平稳且无明显异常，输出 "low"；如果有轻度异常输出 "medium"；如果有跌倒、拒食、嗜睡等严重情况输出 "high"。
+- "reason": 给出简短的评估理由（20字以内）。
+"""
+      fallback = {"level": "low", "reason": "无法调用API，采取默认低风险"}
+      result = _deepseek_json(prompt, fallback=fallback)
+      
+      # 更新 Order 风险级别
+      order.current_risk_level = result.get('level', 'low')
+      order.risk_reason = result.get('reason', '')
+      db.commit()
+
       flash('日志已保存','success')
       return redirect(url_for('worker_log', order_id=order_id))
 
@@ -1692,7 +2275,7 @@ def worker_log(order_id):
     users = {u.id: (u.name, u.role) for u in db.query(User).all()}
     for lg in raw_logs:
       nm, role = users.get(lg.worker_id, (None, 'worker'))
-      logs.append(type('L',(), dict(id=lg.id, order_id=lg.order_id, worker_id=lg.worker_id, worker_name=format_display_name(nm, role) if nm else None, content=lg.content, anomalies=lg.anomalies, duration_minutes=lg.duration_minutes, created_at=lg.created_at)))
+      logs.append(type('L',(), dict(id=lg.id, order_id=lg.order_id, worker_id=lg.worker_id, worker_name=format_display_name(nm, role) if nm else None, content=lg.content, anomalies=lg.anomalies, duration_minutes=lg.duration_minutes, photo_path=getattr(lg, 'photo_path', None), created_at=lg.created_at)))
     from flask import render_template
     return render_template('worker_log.html', order=order, logs=logs)
   finally:
@@ -1726,9 +2309,19 @@ def worker_handover(order_id):
 
 @app.route('/worker/complete/<int:order_id>', methods=['POST','GET'])
 def worker_complete(order_id):
-    flash('已完成订单（占位）','success')
-    return redirect(url_for('worker_orders'))
-
+    db = db_session()
+    try:
+        o = db.get(Order, order_id)
+        if o and o.accepted_worker_id == current_user.id:
+            o.status = 'completed'
+            db.add(o)
+            db.commit()
+            flash('已完成订单，感谢您的辛苦付出！','success')
+        else:
+            flash('无法完成该订单','danger')
+        return redirect(url_for('worker_orders'))
+    finally:
+        db.close()
 @app.route('/elder/logs/<int:order_id>')
 def elder_logs(order_id):
   db = db_session()
@@ -1779,7 +2372,7 @@ def worker_public(worker_id):
 @app.route('/worker/accept/<int:order_id>', methods=['POST','GET'])
 def worker_accept(order_id):
   if not current_user.is_authenticated or not require_worker():
-    flash('只有护工可以接单','warning')
+    flash('只有护工可以申请接单','warning')
     return redirect(url_for('index'))
 
   db = db_session()
@@ -1788,23 +2381,93 @@ def worker_accept(order_id):
     if not o:
       flash('订单不存在','warning')
       return redirect(url_for('worker_available_orders'))
-    if o.status != 'open':
-      flash('该订单当前不可接','warning')
+    if o.status not in ('open', 'handover'):
+      flash('该订单当前不可申请','warning')
       return redirect(url_for('worker_available_orders'))
 
-    # 接单：设置接单护工并更新状态
-    o.accepted_worker_id = current_user.id
-    o.status = 'in_progress'
-    db.add(o)
+    seen = session.get("order_brief_seen", [])
+    if order_id not in seen:
+      flash('接单/接手前请先阅读“30秒可读摘要+待办清单”', 'warning')
+      return redirect(url_for('worker_preview_logs', order_id=order_id))
+    existing = db.query(OrderApplication).filter(
+      OrderApplication.order_id == order_id,
+      OrderApplication.worker_id == current_user.id
+    ).first()
+    if existing and existing.status == 'pending':
+      flash('你已经申请过该订单，请等待老人审核','info')
+      return redirect(url_for('worker_available_orders'))
+    if existing and existing.status == 'rejected':
+      existing.status = 'pending'
+      existing.applied_at = datetime.utcnow()
+      existing.reviewed_at = None
+      db.add(existing)
+    elif not existing:
+      db.add(OrderApplication(order_id=order_id, worker_id=current_user.id, status='pending'))
     db.commit()
-    flash('接单成功','success')
-    return redirect(url_for('worker_orders'))
+    flash('申请已提交，请等待老人确认','success')
+    return redirect(url_for('worker_available_orders'))
   finally:
     db.close()
 
 @app.route('/worker/preview_logs/<int:order_id>')
 def worker_preview_logs(order_id):
-    return rtemplate("""{% extends 'BASE' %}{% block content %}<div class='card p-4'>历史日志预览（占位）</div>{% endblock %}""")
+    if not current_user.is_authenticated or not require_worker():
+      flash('只有护工可以查看历史日志预览', 'warning')
+      return redirect(url_for('index'))
+
+    db = db_session()
+    try:
+      order = db.get(Order, order_id)
+      if not order:
+        flash('订单不存在', 'warning')
+        return redirect(url_for('worker_available_orders'))
+
+      raw_logs = db.query(CareLog).filter(CareLog.order_id == order_id).order_by(CareLog.created_at.desc()).all()
+      users = {u.id: (u.name, u.role) for u in db.query(User).all()}
+      logs = []
+      for lg in raw_logs:
+        nm, role = users.get(lg.worker_id, (None, 'worker'))
+        logs.append(type('L', (), dict(
+          id=lg.id,
+          worker_name=format_display_name(nm, role) if nm else '护工',
+          content=lg.content,
+          anomalies=lg.anomalies,
+          duration_minutes=lg.duration_minutes,
+          photo_path=getattr(lg, 'photo_path', None),
+          created_at=lg.created_at
+        )))
+
+      if not logs:
+        from datetime import timedelta
+        seed = order_id * 991 + (order.elder_id or 0) * 17
+        rng = _seeded_rng(seed)
+        worker_surnames = ['李', '肖', '陈', '王', '张', '赵', '刘', '周']
+        wn = [s + '护工' for s in rng.sample(worker_surnames, 3)]
+        contents = [
+          '协助老人洗漱并完成晨间血压测量，状态平稳。',
+          '午间协助进食与补水，进行15分钟肢体活动训练。',
+          '按时提醒并协助用药，记录用药后反应正常。',
+          '晚间陪伴沟通，进行睡前翻身与皮肤观察。',
+          '完成康复训练动作指导，步态较前日更稳定。',
+          '整理居住环境并复核次日护理计划。'
+        ]
+        anomalies_pool = [None, None, '午后轻微乏力，已休息后缓解。', '血压短时波动，已复测恢复正常。', '膝关节轻度不适，已减少训练强度。']
+        base = datetime.utcnow() - timedelta(days=6)
+        for i in range(7):
+          logs.append(type('L', (), dict(
+            id=0,
+            worker_name=wn[i % len(wn)],
+            content=contents[i % len(contents)],
+            anomalies=anomalies_pool[rng.randint(0, len(anomalies_pool) - 1)],
+            duration_minutes=rng.randint(35, 95),
+            photo_path=None,
+            created_at=base + timedelta(days=i, hours=rng.randint(8, 19), minutes=rng.randint(0, 59))
+          )))
+        logs.sort(key=lambda x: x.created_at, reverse=True)
+
+      return render_template('worker_preview_logs.html', order=order, logs=logs)
+    finally:
+      db.close()
 
 @app.route('/worker/orders')
 def worker_orders():
@@ -1818,6 +2481,11 @@ def worker_orders():
     my_q = db.query(Order).filter(Order.accepted_worker_id == current_user.id, Order.status != 'completed').order_by(Order.id.desc()).all()
     # 历史（已完成）
     history_q = db.query(Order).filter(Order.accepted_worker_id == current_user.id, Order.status == 'completed').order_by(Order.id.desc()).all()
+    applied_ids = [r.order_id for r in db.query(OrderApplication).filter(
+      OrderApplication.worker_id == current_user.id,
+      OrderApplication.status == 'pending'
+    ).all()]
+    applied_q = db.query(Order).filter(Order.id.in_(applied_ids), Order.accepted_worker_id != current_user.id).order_by(Order.id.desc()).all() if applied_ids else []
 
     elders = {u.id: format_display_name(u.name, 'elder') for u in db.query(User).filter(User.role=='elder').all()}
 
@@ -1829,19 +2497,67 @@ def worker_orders():
     for o in history_q:
       history_orders.append(type('O', (), dict(id=o.id, title=o.title, status=o.status, skills_required=o.skills_required, elder_name=elders.get(o.elder_id, '—'))))
 
-    return rtemplate(WORKER_ORDERS, my_orders=my_orders, history_orders=history_orders , skills=SKILL_CHOICES)
+    applied_orders = []
+    for o in applied_q:
+      applied_orders.append(type('O', (), dict(
+        id=o.id, title=o.title, status=o.status, skills_required=o.skills_required,
+        acceptable_price_range=getattr(o, 'acceptable_price_range', None),
+        elder_name=elders.get(o.elder_id, '—')
+      )))
+
+    return rtemplate(WORKER_ORDERS, my_orders=my_orders, applied_orders=applied_orders, history_orders=history_orders , skills=SKILL_CHOICES)
   finally:
     db.close()
 
 @app.route('/worker/profile', methods=['GET','POST'])
 def worker_profile():
+    if not current_user.is_authenticated or not require_worker():
+      flash('只有护工可以维护个人资料', 'warning')
+      return redirect(url_for('index'))
+
+    if request.method == 'POST':
+      db = db_session()
+      try:
+        u = db.get(User, current_user.id)
+        if not u or u.role != 'worker':
+          flash('护工账号不存在', 'warning')
+          return redirect(url_for('index'))
+
+        price_raw = (request.form.get('price_per_hour') or '').strip()
+        try:
+          u.price_per_hour = float(price_raw) if price_raw else None
+        except Exception:
+          flash('价格格式不正确', 'warning')
+          return redirect(url_for('worker_profile'))
+
+        skills = [s.strip() for s in request.form.getlist('skills') if s and s.strip()]
+        # 去重并保持顺序，避免重复技能显示
+        seen = set()
+        skills = [s for s in skills if not (s in seen or seen.add(s))]
+        u.skills_display = ", ".join(skills) if skills else None
+
+        phone = (request.form.get('phone') or '').strip()
+        u.phone = phone or None
+
+        db.add(u)
+        db.commit()
+        flash('资料保存成功', 'success')
+      finally:
+        db.close()
+      return redirect(url_for('worker_profile'))
+
     return rtemplate(WORKER_PROFILE, u=current_user, skills=SKILL_CHOICES)
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'uploads')
 ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg'}
+LOG_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'log_uploads')
+LOG_ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
 def _allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def _allowed_log_photo(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in LOG_ALLOWED_EXTENSIONS
 
 @app.route('/worker/hospital-bind', methods=['GET','POST'])
 @login_required
@@ -1850,6 +2566,10 @@ def worker_hospital_bind():
         flash('只有护工可以访问医院绑定页面','warning')
         return redirect(url_for('index'))
     if request.method == 'POST':
+        hospital_name = (request.form.get('hospital_name') or '').strip()
+        if not hospital_name:
+            flash('请先选择或填写医院名称', 'warning')
+            return redirect(url_for('worker_hospital_bind'))
         f = request.files.get('hospital_proof')
         if f and f.filename and _allowed_file(f.filename):
             os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -1862,6 +2582,7 @@ def worker_hospital_bind():
                 u = db.get(User, current_user.id)
                 if u:
                     u.hospital_proof_path = f"uploads/{fn}"
+                    u.hospital_name = hospital_name
                     db.add(u)
                     db.commit()
                 flash('医院证明已提交，我们将尽快审核','success')
@@ -1874,9 +2595,10 @@ def worker_hospital_bind():
     try:
         u = db.get(User, current_user.id)
         has_proof = bool(u and getattr(u, 'hospital_proof_path', None))
+        current_hospital = getattr(u, 'hospital_name', None) if u else None
     finally:
         db.close()
-    return render_template('worker_hospital_bind.html', has_proof=has_proof)
+    return render_template('worker_hospital_bind.html', has_proof=has_proof, current_hospital=current_hospital)
 
 @app.route('/worker/available')
 def worker_available_orders():
@@ -1886,12 +2608,28 @@ def worker_available_orders():
 
   db = db_session()
   try:
-    # 可接订单：状态为 open 的订单
-    orders = db.query(Order).filter(Order.status == 'open').order_by(Order.id.desc()).all()
+    # 可接订单：状态为 open 或 handover（待接手）
+    orders = db.query(Order).filter(Order.status.in_(['open', 'handover'])).order_by(Order.id.desc()).all()
+    order_ids = [o.id for o in orders]
+    app_map = {}
+    if order_ids:
+      app_map = {r.order_id: r.status for r in db.query(OrderApplication).filter(
+        OrderApplication.worker_id == current_user.id,
+        OrderApplication.order_id.in_(order_ids)
+      ).all()}
     elders = {u.id: format_display_name(u.name, 'elder') for u in db.query(User).filter(User.role=='elder').all()}
     available = []
     for o in orders:
-      available.append(type('O', (), dict(id=o.id, title=o.title, status=o.status, skills_required=o.skills_required, elder_name=elders.get(o.elder_id, '—'))))
+      available.append(type('O', (), dict(
+        id=o.id,
+        title=o.title,
+        status=o.status,
+        skills_required=o.skills_required,
+        acceptable_price_range=getattr(o, 'acceptable_price_range', None),
+        handover_notes=getattr(o, 'handover_notes', None),
+        applied=(app_map.get(o.id) == 'pending'),
+        elder_name=elders.get(o.elder_id, '—')
+      )))
     return rtemplate(WORKER_AVAILABLE_ORDERS, available=available)
   finally:
     db.close()
@@ -1983,10 +2721,6 @@ if __name__ == "__main__":
   print("  家属: family@hlzl.test / pass123")
   print("=" * 50)
 
-  app.jinja_env.globals.update({
-    'SKILL_CHOICES': SKILL_CHOICES,
-    'now': datetime.utcnow,
-    'status_label': status_label
-  })
+
 
   app.run(host="0.0.0.0", port=args.port, debug=True)

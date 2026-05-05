@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CareLink Risk Control</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    body {
+      background:
+        radial-gradient(circle at 10% 0%, rgba(13,148,136,0.16), transparent 35%),
+        radial-gradient(circle at 90% 10%, rgba(100,116,139,0.18), transparent 28%),
+        #0b1320;
+      color: #e2e8f0;
+    }
+    .glass {
+      background: linear-gradient(180deg, rgba(15,23,42,0.92), rgba(15,23,42,0.72));
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      box-shadow: 0 10px 30px rgba(2, 6, 23, 0.35);
+    }
+    .hover-lift {
+      transition: all 0.2s ease;
+    }
+    .hover-lift:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 34px rgba(2, 6, 23, 0.45);
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="mx-auto max-w-7xl px-5 py-6 md:px-8 md:py-8">
+    <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <div class="text-xs uppercase tracking-[0.2em] text-teal-300">CareLink Risk Control</div>
+        <h1 class="mt-1 text-2xl font-semibold text-white md:text-3xl">商业长护险控费与风险减量监控中心</h1>
+      </div>
+      <a href="/admin/dashboard" class="rounded-lg border border-slate-500 px-4 py-2 text-sm text-slate-200 transition hover:border-teal-400 hover:text-teal-300">
+        返回管理员后台
+      </a>
+    </div>
+
+    <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div class="glass hover-lift rounded-2xl p-5">
+        <div class="text-sm text-slate-300">本月监控参保老人总数</div>
+        <div class="mt-3 text-3xl font-bold tracking-tight text-white">2,458 人</div>
+        <div class="mt-2 text-xs text-slate-300">覆盖在管老人全样本</div>
+      </div>
+      <div class="glass hover-lift rounded-2xl p-5">
+        <div class="text-sm text-slate-300">今日新增高危预警数</div>
+        <div class="mt-3 text-3xl font-bold tracking-tight text-white">{{ today_high_risk | default(12) }} 次</div>
+        <div class="mt-2 flex items-center gap-2 text-xs text-slate-300"><span class="text-emerald-400">↓</span><span>环比下降 40%</span></div>
+      </div>
+      <div class="glass hover-lift rounded-2xl p-5">
+        <div class="text-sm text-slate-300">压疮/跌倒等次生事故发生率</div>
+        <div class="mt-3 text-3xl font-bold tracking-tight text-white">1.2%</div>
+        <div class="mt-2 text-xs text-slate-300">行业平均 8.5%</div>
+      </div>
+      <div class="glass hover-lift rounded-2xl p-5">
+        <div class="text-sm text-slate-300">本月累计预估节省理赔金</div>
+        <!-- (加粗高亮) -->
+        <div class="mt-3 text-4xl font-extrabold tracking-tight text-emerald-300" style="text-shadow: 0 0 10px rgba(52,211,153,0.4);">¥ {{ "{:,}".format(saved_amount) if saved_amount is defined else "845,000" }}</div>
+        <div class="mt-2 text-xs text-slate-300">基于风险干预模型估算</div>
+      </div>
+    </section>
+
+    <section class="mt-5 grid gap-4 lg:grid-cols-3">
+      <div class="glass hover-lift rounded-2xl p-5 lg:col-span-2">
+        <div class="mb-4 flex items-center justify-between">
+          <h2 class="text-base font-semibold text-slate-100">高危群体血压与并发症风险指数连续 14 天趋势</h2>
+          <span class="rounded-md bg-teal-600/20 px-2 py-1 text-xs text-teal-200">实时更新</span>
+        </div>
+        <div class="h-72 w-full rounded-xl bg-slate-900/40 p-2 hover-lift">
+          <canvas id="riskTrendChart"></canvas>
+        </div>
+      </div>
+
+      <div class="glass hover-lift rounded-2xl p-5">
+        <div class="mb-4 flex items-center justify-between">
+          <h2 class="text-base font-semibold">实时异常预警滚动列表</h2>
+          <span class="text-xs text-slate-300">Alert Feed</span>
+        </div>
+        <div class="max-h-72 space-y-3 overflow-y-auto pr-1">
+          {% if risk_orders %}
+            {% for ro in risk_orders %}
+            <div class="rounded-xl border border-slate-600 bg-slate-900/40 p-3 hover-lift" id="ro-card-{{ ro.id }}">
+              <div class="flex items-center justify-between mb-2">
+                {% if ro.risk_level == 'high' %}
+                <span class="rounded bg-red-500/90 px-2 py-1 text-xs font-medium text-white shadow shadow-red-500/40">[高危] {{ ro.elder_name }}</span>
+                {% else %}
+                <span class="rounded bg-amber-500/90 px-2 py-1 text-xs font-medium text-white shadow shadow-amber-500/40">[中危] {{ ro.elder_name }}</span>
+                {% endif %}
+                <span class="text-xs text-slate-400">工单 #{{ ro.id }}</span>
+              </div>
+              <p class="text-sm leading-6 text-slate-200 mb-3">触发原因：{{ ro.reason }}</p>
+              <div class="flex justify-end mt-2">
+                <button class="rounded border border-teal-500/50 bg-teal-500/10 px-3 py-1.5 text-xs font-medium text-teal-300 transition hover:bg-teal-500/20" onclick="markIntervened({{ ro.id }})"> [标记为已干预] </button>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="rounded-xl border border-slate-600 border-dashed bg-slate-900/20 p-5 text-center">
+              <div class="text-sm text-slate-400">目前暂无进行中的高危或中危异常工单</div>
+            </div>
+          {% endif %}
+        </div>
+        
+        <script>
+        function markIntervened(orderId) {
+            if(!confirm("确定标记该工单为已干预状态吗？")) return;
+            fetch('/admin/risk_intervene/' + orderId, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            }).then(r => r.json()).then(data => {
+                if(data.status === 'success') {
+                    const el = document.getElementById('ro-card-' + orderId);
+                    if(el) {
+                        el.style.opacity = '0';
+                        setTimeout(() => el.remove(), 300);
+                    }
+                } else {
+                    alert(data.message || '操作失败');
+                }
+            }).catch(e => alert('网络错误'));
+        }
+        </script>
+      </div>
+    </section>
+
+    <section class="mt-5">
+      <div class="glass rounded-2xl p-5">
+        <div class="mb-4 flex items-center justify-between">
+          <h2 class="text-base font-semibold">护工信用评级与派单拦截</h2>
+          <span class="text-xs text-slate-300">自动策略引擎</span>
+        </div>
+        <div class="overflow-x-auto rounded-xl border border-slate-700">
+          <table class="min-w-full text-left text-sm">
+            <thead class="bg-slate-800/80 text-slate-200">
+              <tr>
+                <th class="px-4 py-3 font-medium">护工姓名</th>
+                <th class="px-4 py-3 font-medium">本月违规次数</th>
+                <th class="px-4 py-3 font-medium">当前信用分</th>
+                <th class="px-4 py-3 font-medium">系统自动动作</th>
+              </tr>
+            </thead>
+            <tbody class="bg-slate-900/40">
+              <tr class="border-b border-slate-700">
+                <td class="px-4 py-3 text-slate-100">唐护工</td>
+                <td class="px-4 py-3 text-slate-300">0</td>
+                <td class="px-4 py-3 font-semibold text-teal-300">98</td>
+                <td class="px-4 py-3"><span class="rounded bg-emerald-500/20 px-2 py-1 text-xs text-emerald-300">优先派单</span></td>
+              </tr>
+              <tr class="border-b border-slate-700">
+                <td class="px-4 py-3 text-slate-100">赵护工</td>
+                <td class="px-4 py-3 text-slate-300">1</td>
+                <td class="px-4 py-3 font-semibold text-teal-300">95</td>
+                <td class="px-4 py-3"><span class="rounded bg-sky-500/20 px-2 py-1 text-xs text-sky-300">正常派单</span></td>
+              </tr>
+              <tr>
+                <td class="px-4 py-3 text-slate-100">小李护工</td>
+                <td class="px-4 py-3 text-slate-300">3</td>
+                <td class="px-4 py-3 font-semibold text-teal-300">82</td>
+                <td class="px-4 py-3"><span class="rounded bg-rose-500/20 px-2 py-1 text-xs text-rose-300">暂停接高风险单</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      const el = document.getElementById('riskTrendChart');
+      if (!el || typeof Chart === 'undefined') return;
+      new Chart(el.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: ['D1','D2','D3','D4','D5','D6','D7','D8','D9','D10','D11','D12','D13','D14'],
+          datasets: [
+            {
+              label: '在管老人',
+              data: [47,48,47,49,48,49,50,50,51,50,51,52,51,52],
+              borderColor: '#34d399',
+              backgroundColor: 'rgba(52, 211, 153, 0.18)',
+              tension: 0.35,
+              fill: false,
+              pointRadius: 0,
+              borderWidth: 3
+            },
+            {
+              label: '行业均值',
+              data: [55,56,58,60,62,63,64,67,68,70,72,73,75,77],
+              borderColor: '#9ca3af',
+              backgroundColor: 'rgba(156, 163, 175, 0.18)',
+              tension: 0.35,
+              fill: false,
+              pointRadius: 0,
+              borderWidth: 3
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: '#cbd5e1' } }
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148, 163, 184, 0.16)' } },
+            y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148, 163, 184, 0.16)' } }
+          }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

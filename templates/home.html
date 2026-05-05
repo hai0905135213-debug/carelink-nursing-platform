@@ -13,6 +13,13 @@
         <a class="btn btn-outline-light btn-lg px-4"
           href="{{ url_for('elder_create') if current_user.is_authenticated else url_for('login') }}"><i
             class="bi bi-plus-circle me-2"></i>发布护理订单</a>
+        {% if current_user.is_authenticated and current_user.role == 'family' and bound_elder %}
+        <form method="post" action="{{ url_for('family_login_elder') }}" class="m-0">
+          <button class="btn btn-warning btn-lg px-4 text-white">
+            <i class="bi bi-person-check me-2"></i>登录老人端（{{ display_name(bound_elder) }}）
+          </button>
+        </form>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -140,17 +147,25 @@
   <div class="col-lg-8">
     <h4 class="fw-bold mb-4">服务项目</h4>
     <div class="row g-4">
-      <!-- 移除行内样式，改用简单的 bootstrap 工具类 -->
+      <!-- 采用激进的大色块和高对比度字体排印设计 -->
       {% for box in services %}
       <div class="col-md-6">
-        <div class="card p-4 h-100 border-0 bg-white shadow-sm">
-          <div class="d-flex align-items-center mb-3">
-            <div class="rounded-3 bg-light text-primary p-2 me-3 fs-4"><i class="bi {{ box.icon }}"></i></div>
-            <div class="fw-bold fs-5">{{ box.title }}</div>
+        <div class="card p-4 h-100 border-0" style="border-top: 5px solid {{ box.color }} !important; position: relative;">
+          <!-- 激进的装饰性图表几何元素 -->
+          <div style="position: absolute; right: -30px; bottom: -30px; width: 140px; height: 140px; background: {{ box.bg }}; border-radius: 50%; opacity: 0.7; z-index: 0; pointer-events: none;"></div>
+          <div style="position: absolute; right: 40px; top: -10px; width: 60px; height: 60px; background: {{ box.bg }}; border-radius: 12px; transform: rotate(15deg); opacity: 0.5; z-index: 0; pointer-events: none;"></div>
+          
+          <div class="d-flex align-items-center mb-4" style="position: relative; z-index: 1;">
+            <div class="rounded-4 p-3 me-4 fs-2 d-flex align-items-center justify-content-center shadow-sm" style="color: {{ box.color }}; background: {{ box.bg }}; width: 68px; height: 68px;">
+              <i class="bi {{ box.icon }}"></i>
+            </div>
+            <div class="fw-bolder fs-4 text-dark" style="letter-spacing: 1px;">{{ box.title }}</div>
           </div>
-          <ul class="list-unstyled text-secondary small mb-0 ps-1">
+          <ul class="list-unstyled mb-0 ps-2" style="position: relative; z-index: 1;">
             {% for li in box['items'] %}
-            <li class="mb-1"><i class="bi bi-dot me-1"></i>{{ li }}</li>
+            <li class="mb-3 fw-bold text-dark d-flex align-items-center" style="font-size: 1.1rem; letter-spacing: 0.5px;">
+              <i class="bi bi-check-circle-fill me-3" style="color: {{ box.color }}; font-size: 1.25rem;"></i>{{ li }}
+            </li>
             {% endfor %}
           </ul>
         </div>
@@ -189,8 +204,11 @@
       </div>
       <div class="fw-bold fs-5 mb-2">{{ o.title }}</div>
       <div class="small text-secondary mb-3 text-truncate">需：{{ o.skills_required }}</div>
-      <a class="btn btn-outline-primary btn-sm mt-auto w-100"
-        href="{{ url_for('order_detail', order_id=o.id) }}">查看详情</a>
+      {% if o.worker_name %}
+      <div class="small text-primary mt-auto"><i class="bi bi-person-badge me-1"></i>负责护工：<span class="fw-semibold">{{ o.worker_name }}</span></div>
+      {% else %}
+      <div class="small text-muted mt-auto"><i class="bi bi-hourglass-split me-1"></i>等待护工接单...</div>
+      {% endif %}
     </div>
   </div>
   {% else %}

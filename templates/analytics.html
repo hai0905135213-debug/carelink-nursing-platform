@@ -146,9 +146,9 @@
 <script>
   window.ANALYTICS_PAYLOAD = {
     daily_labels: {{ daily_labels | tojson }},
-  daily_values: { { daily_values | tojson } },
-  worker_labels: { { worker_labels | tojson } },
-  worker_values: { { worker_values | tojson } }
+    daily_values: {{ daily_values | tojson }},
+    worker_labels: {{ worker_labels | tojson }},
+    worker_values: {{ worker_values | tojson }}
   };
 
   (function () {

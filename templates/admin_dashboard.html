@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>平台管理后台</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    :root {
+      --bg-0: #0b1224;
+      --bg-1: #101a33;
+      --bg-2: #162544;
+      --line: #2a3d66;
+      --text-0: #e6eeff;
+      --text-1: #9fb2d8;
+      --accent: #5cc8ff;
+      --accent-2: #f59e0b;
+    }
+    body {
+      background:
+        radial-gradient(circle at 15% 10%, rgba(92, 200, 255, 0.12), transparent 35%),
+        radial-gradient(circle at 85% 0%, rgba(245, 158, 11, 0.10), transparent 30%),
+        var(--bg-0);
+      color: var(--text-0);
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .cardx {
+      background: linear-gradient(180deg, rgba(22, 37, 68, 0.95), rgba(16, 26, 51, 0.95));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 12px 28px rgba(5, 10, 24, 0.35);
+    }
+    .table { color: var(--text-0); margin-bottom: 0; }
+    .table td, .table th { border-color: #2b4068; }
+    .table thead th { color: #c6d6f8; font-weight: 700; background: rgba(11, 18, 36, 0.35); }
+    .text-secondary { color: var(--text-1) !important; }
+    .kpi { font-size: 1.75rem; font-weight: 800; letter-spacing: 0.2px; }
+    .chart-shell {
+      background: radial-gradient(circle at 10% 10%, rgba(92, 200, 255, 0.10), rgba(0,0,0,0) 45%), #0f1a34;
+      border: 1px solid #243a64;
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .btn-warning {
+      background: linear-gradient(135deg, #f59e0b, #f97316);
+      border: none;
+      color: #fff;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h3 class="mb-1">平台管理后台</h3>
+        <div class="text-secondary">用户分端信息总览与调研报告生成</div>
+      </div>
+      <div class="d-flex gap-2">
+        <a class="btn btn-info text-white fw-bold" href="{{ url_for('admin_risk_control') }}">进入风险监控中心</a>
+        <button class="btn btn-warning" id="btn-report">生成并下载 PDF 报告</button>
+        <a class="btn btn-outline-light" href="{{ url_for('admin_logout') }}">退出管理员</a>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-3"><div class="cardx"><div class="text-secondary small">护工总数</div><div class="kpi">{{ workers|length }}</div></div></div>
+      <div class="col-md-3"><div class="cardx"><div class="text-secondary small">老人总数</div><div class="kpi">{{ elders|length }}</div></div></div>
+      <div class="col-md-3"><div class="cardx"><div class="text-secondary small">家属总数</div><div class="kpi">{{ families|length }}</div></div></div>
+      <div class="col-md-3"><div class="cardx"><div class="text-secondary small">订单总数</div><div class="kpi">{{ orders|length }}</div></div></div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="cardx">
+          <h5>护工端信息</h5>
+          <div class="table-responsive">
+            <table class="table table-sm">
+              <thead><tr><th>ID</th><th>姓名</th><th>价格</th><th>评分</th><th>医院标签</th><th>技能</th></tr></thead>
+              <tbody>
+                {% for w in workers %}
+                <tr>
+                  <td>{{ w.id }}</td><td>{{ display_name(w) }}</td>
+                  <td>¥{{ '%.0f'|format(w.price_per_hour or 0) }}/h</td>
+                  <td>{{ '%.2f'|format(w.rating or 0) }}</td>
+                  <td>
+                    {% if w.hospital_name %}
+                    {% set hb = hospital_brand(w.hospital_name) %}
+                    <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:999px;background:linear-gradient(135deg,#f8e7a7,#d4af37);color:#4a3a08;font-weight:700;font-size:12px;">
+                      <i class="bi bi-patch-check-fill"></i>
+                      {% if hb.logo %}<img src="{{ hb.logo }}" alt="hospital-logo" style="width:14px;height:14px;border-radius:2px;background:#fff;">{% endif %}
+                      {{ w.hospital_name }}
+                    </span>
+                    {% else %}未绑定{% endif %}
+                  </td>
+                  <td>{{ w.skills_display or '—' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="cardx mb-3">
+          <h5>老人端信息</h5>
+          <div class="table-responsive">
+            <table class="table table-sm">
+              <thead><tr><th>ID</th><th>姓名</th><th>邮箱</th></tr></thead>
+              <tbody>{% for e in elders %}<tr><td>{{ e.id }}</td><td>{{ display_name(e) }}</td><td>{{ e.email }}</td></tr>{% endfor %}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="cardx">
+          <h5>家属端信息</h5>
+          <div class="table-responsive">
+            <table class="table table-sm">
+              <thead><tr><th>ID</th><th>姓名</th><th>邮箱</th><th>绑定老人ID</th></tr></thead>
+              <tbody>{% for f in families %}<tr><td>{{ f.id }}</td><td>{{ display_name(f) }}</td><td>{{ f.email }}</td><td>{{ f.bound_elder_id or '—' }}</td></tr>{% endfor %}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3 mt-1">
+      <div class="col-lg-8">
+        <div class="cardx">
+          <h5>护理需求频次柱状图（来自订单需求）</h5>
+          <div class="chart-shell">
+            <canvas id="needChart" height="110"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-4">
+        <div class="cardx">
+          <h5>护理需求结构占比</h5>
+          <div class="chart-shell">
+            <canvas id="needPie" height="110"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3 mt-1">
+      <div class="col-lg-4">
+        <div class="cardx">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h5 class="mb-0">交接完整率</h5>
+            <span class="badge text-bg-warning">演示数据</span>
+          </div>
+          <div class="chart-shell">
+            <canvas id="handoverRateChart" height="150"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-4">
+        <div class="cardx">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h5 class="mb-0">日志及时率</h5>
+            <span class="badge text-bg-warning">演示数据</span>
+          </div>
+          <div class="chart-shell">
+            <canvas id="logTimelyChart" height="150"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-4">
+        <div class="cardx">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h5 class="mb-0">未完成任务闭环率</h5>
+            <span class="badge text-bg-warning">演示数据</span>
+          </div>
+          <div class="chart-shell">
+            <canvas id="closureRateChart" height="150"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cardx mt-3">
+      <h5>报告下载状态</h5>
+      <div id="reportBox" class="small text-secondary">点击上方按钮后会自动下载 PDF 报告文件。</div>
+    </div>
+  </div>
+
+  <script>
+    const needLabels = {{ need_labels|tojson }};
+    const needValues = {{ need_values|tojson }};
+    Chart.defaults.color = '#c9d7f6';
+    Chart.defaults.borderColor = 'rgba(148, 163, 184, 0.2)';
+    const ctx = document.getElementById('needChart').getContext('2d');
+    const barGrad = ctx.createLinearGradient(0, 0, 0, 280);
+    barGrad.addColorStop(0, 'rgba(92, 200, 255, 0.95)');
+    barGrad.addColorStop(1, 'rgba(59, 130, 246, 0.45)');
+    new Chart(ctx, {
+      type: 'bar',
+      data: { labels: needLabels, datasets: [{ label: '需求频次', data: needValues, backgroundColor: barGrad, borderRadius: 8, borderSkipped: false }] },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: 'rgba(148, 163, 184, 0.12)' }, ticks: { color: '#bcd0f5' } },
+          y: { beginAtZero: true, grid: { color: 'rgba(148, 163, 184, 0.12)' }, ticks: { color: '#bcd0f5' } }
+        }
+      }
+    });
+    const pctx = document.getElementById('needPie').getContext('2d');
+    const pieLabels = needLabels.slice(0, 6);
+    const pieValues = needValues.slice(0, 6);
+    new Chart(pctx, {
+      type: 'doughnut',
+      data: { labels: pieLabels, datasets: [{ data: pieValues, backgroundColor: ['#5cc8ff','#3b82f6','#34d399','#f87171','#c084fc','#fbbf24'], borderColor: '#0f1a34', borderWidth: 2 }] },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { labels: { color: '#c9d7f6', boxWidth: 12 } }
+        }
+      }
+    });
+
+    // 演示型运营指标（当前版本无完备真实数据，先用于后台可视化展示）
+    const monthly = ['1月','2月','3月','4月','5月','6月'];
+    new Chart(document.getElementById('handoverRateChart').getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: monthly,
+        datasets: [{
+          label: '交接完整率',
+          data: [72, 75, 79, 83, 81, 86],
+          borderColor: '#34d399',
+          backgroundColor: 'rgba(52, 211, 153, 0.18)',
+          fill: true,
+          tension: 0.35,
+          pointRadius: 3
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+
+    new Chart(document.getElementById('logTimelyChart').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: monthly,
+        datasets: [{
+          label: '日志及时率',
+          data: [68, 74, 77, 81, 84, 88],
+          backgroundColor: 'rgba(92, 200, 255, 0.75)',
+          borderRadius: 8
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+
+    new Chart(document.getElementById('closureRateChart').getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels: ['已闭环', '未闭环'],
+        datasets: [{
+          data: [82, 18],
+          backgroundColor: ['#f59e0b', 'rgba(148, 163, 184, 0.35)'],
+          borderColor: '#0f1a34',
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { labels: { color: '#c9d7f6' } }
+        }
+      }
+    });
+
+    document.getElementById('btn-report').addEventListener('click', function(){
+      const btn = this;
+      btn.disabled = true;
+      btn.textContent = '生成中...';
+      fetch('{{ url_for("admin_report") }}', { method: 'POST', credentials: 'same-origin' })
+        .then(async r => {
+          if (!r.ok) {
+            const t = await r.text();
+            throw new Error(t.slice(0, 200));
+          }
+          return r.json();
+        })
+        .then((d) => {
+          if (d.error) throw new Error(d.error);
+          const r = d.report || {};
+          const needLabelsNow = d.need_labels || needLabels;
+          const needValuesNow = d.need_values || needValues;
+          const ts = new Date().toLocaleString('zh-CN');
+          const li = (arr) => (Array.isArray(arr) ? arr : (arr ? [String(arr)] : [])).map(x => `<li>${x}</li>`).join('') || '<li>无</li>';
+          const needRows = needLabelsNow.map((x,i)=>`<tr><td style="padding:6px 8px;border:1px solid #dfe3eb;">${x}</td><td style="padding:6px 8px;border:1px solid #dfe3eb;text-align:right;">${needValuesNow[i]||0}</td></tr>`).join('');
+          const chart1 = document.getElementById('needChart') ? document.getElementById('needChart').toDataURL('image/png', 1.0) : '';
+          const chart2 = document.getElementById('needPie') ? document.getElementById('needPie').toDataURL('image/png', 1.0) : '';
+          const kpi1 = document.getElementById('handoverRateChart') ? document.getElementById('handoverRateChart').toDataURL('image/png', 1.0) : '';
+          const kpi2 = document.getElementById('logTimelyChart') ? document.getElementById('logTimelyChart').toDataURL('image/png', 1.0) : '';
+          const kpi3 = document.getElementById('closureRateChart') ? document.getElementById('closureRateChart').toDataURL('image/png', 1.0) : '';
+          const html = `
+            <div style="font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif;color:#1f2937;padding:28px;background:#fff;">
+              <style>
+                .avoid-break { page-break-inside: avoid; break-inside: avoid; }
+              </style>
+              <div style="background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff;padding:20px 24px;border-radius:12px;">
+                <div style="font-size:24px;font-weight:700;">护理平台调研分析报告</div>
+                <div style="opacity:.85;margin-top:6px;">生成时间：${ts}</div>
+              </div>
+              <div class="avoid-break" style="margin-top:16px;padding:14px;border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;">
+                <div style="font-weight:700;margin-bottom:8px;">平台概览</div>
+                <div>护工总数：{{ workers|length }} ｜ 老人总数：{{ elders|length }} ｜ 家属总数：{{ families|length }} ｜ 订单总数：{{ orders|length }}</div>
+              </div>
+              <div class="avoid-break" style="margin-top:18px;">
+                <div style="font-size:18px;font-weight:700;margin-bottom:10px;">护理需求统计</div>
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                  <thead><tr><th style="text-align:left;padding:6px 8px;border:1px solid #dfe3eb;background:#f3f4f6;">需求标签</th><th style="text-align:right;padding:6px 8px;border:1px solid #dfe3eb;background:#f3f4f6;">频次</th></tr></thead>
+                  <tbody>${needRows}</tbody>
+                </table>
+              </div>
+              <div class="avoid-break" style="margin-top:16px;display:flex;gap:14px;">
+                ${chart1 ? `<img src="${chart1}" style="width:65%;border:1px solid #e5e7eb;border-radius:8px;">` : ''}
+                ${chart2 ? `<img src="${chart2}" style="width:35%;border:1px solid #e5e7eb;border-radius:8px;">` : ''}
+              </div>
+              <div class="avoid-break" style="margin-top:18px;">
+                <div style="font-size:18px;font-weight:700;margin-bottom:10px;">运营过程指标（演示数据）</div>
+                <div style="display:flex;gap:10px;">
+                  ${kpi1 ? `<img src="${kpi1}" style="width:33%;border:1px solid #e5e7eb;border-radius:8px;">` : ''}
+                  ${kpi2 ? `<img src="${kpi2}" style="width:33%;border:1px solid #e5e7eb;border-radius:8px;">` : ''}
+                  ${kpi3 ? `<img src="${kpi3}" style="width:33%;border:1px solid #e5e7eb;border-radius:8px;">` : ''}
+                </div>
+              </div>
+              <div style="margin-top:18px;">
+                <div style="font-size:18px;font-weight:700;">分端洞察</div>
+                <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px;">
+                  <div class="avoid-break" style="border:1px solid #e5e7eb;border-radius:10px;padding:10px;"><div style="font-weight:700;color:#0f766e;">护工端洞察</div><ul>${li(r.worker_insight)}</ul></div>
+                  <div class="avoid-break" style="border:1px solid #e5e7eb;border-radius:10px;padding:10px;"><div style="font-weight:700;color:#7c2d12;">老人端洞察（匿名）</div><ul>${li(r.elder_insight)}</ul></div>
+                  <div class="avoid-break" style="border:1px solid #e5e7eb;border-radius:10px;padding:10px;"><div style="font-weight:700;color:#1d4ed8;">家属端洞察</div><ul>${li(r.family_insight)}</ul></div>
+                  <div class="avoid-break" style="border:1px solid #e5e7eb;border-radius:10px;padding:10px;"><div style="font-weight:700;color:#9333ea;">供需结构洞察</div><ul>${li(r.supply_demand_insight)}</ul></div>
+                  <div class="avoid-break" style="border:1px solid #e5e7eb;border-radius:10px;padding:10px;"><div style="font-weight:700;color:#b45309;">风险提示</div><ul>${li(r.risk_insight)}</ul></div>
+                  <div class="avoid-break" style="border:1px solid #e5e7eb;border-radius:10px;padding:10px;"><div style="font-weight:700;color:#166534;">运营建议</div><ul>${li(r.suggestions)}</ul></div>
+                </div>
+              </div>
+            </div>`;
+          const wrap = document.createElement('div');
+          wrap.innerHTML = html;
+          document.body.appendChild(wrap);
+          const filename = `platform_report_${new Date().toISOString().slice(0,19).replace(/[-:T]/g,'')}.pdf`;
+          html2pdf().set({
+            margin: [10,10,10,10],
+            filename,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            pagebreak: { mode: ['css', 'legacy'] }
+          }).from(wrap).save().then(()=>{
+            wrap.remove();
+          }).catch(()=>{ wrap.remove(); });
+          document.getElementById('reportBox').innerHTML = '<span class="text-success">PDF 报告已生成并下载。</span>';
+        })
+        .catch((e) => { document.getElementById('reportBox').innerHTML = '<span class="text-danger">报告请求失败: '+ e.message +'</span>'; })
+        .finally(() => { btn.disabled = false; btn.textContent = '生成并下载 PDF 报告'; });
+    });
+  </script>
+</body>
+</html>

@@ -24,8 +24,8 @@
     --gray-900: #111827;
 
     /* 全局变量 */
-    --body-bg: #f8fafc;
-    /* 略带蓝灰的背景，比纯白护眼 */
+    --body-bg: #f1f5f9;
+    /* 加深背景灰度，利用环境色差凸显纯白卡片的对比度，层次更分明 */
     --card-bg: #ffffff;
     --card-radius: 16px;
     /* 更大的圆角 */
@@ -147,18 +147,18 @@ a:hover {
 /* 卡片升级 */
 .card {
     background: var(--card-bg);
-    border: 1px solid var(--gray-100);
+    border: 1px solid rgba(0, 0, 0, 0.04);
     border-radius: var(--card-radius);
-    box-shadow: var(--shadow-sm);
-    transition: all 0.3s ease;
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     overflow: hidden;
     /* 确保子元素圆角不溢出 */
 }
 
 .card:hover {
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 14px 28px -6px rgba(13, 148, 136, 0.12), 0 6px 14px -4px rgba(13, 148, 136, 0.08);
     transform: translateY(-4px);
-    border-color: rgba(13, 148, 136, 0.2);
+    border-color: rgba(13, 148, 136, 0.25);
 }
 
 /* Hero 区域：更加大气 */
@@ -244,9 +244,16 @@ a:hover {
     display: flex;
     align-items: center;
     gap: 1rem;
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--gray-100);
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.04);
     height: 100%;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stat-mini:hover {
+    box-shadow: 0 14px 28px -6px rgba(13, 148, 136, 0.12), 0 6px 14px -4px rgba(13, 148, 136, 0.08);
+    transform: translateY(-4px);
+    border-color: rgba(13, 148, 136, 0.25);
 }
 
 .stat-mini .icon {

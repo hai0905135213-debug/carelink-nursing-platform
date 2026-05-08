@@ -19,6 +19,9 @@ class User(Base, UserMixin):
     bound_elder_id = Column(Integer, ForeignKey("users.id"))
     hospital_proof_path = Column(String(255))  # 医院证明文件路径
     hospital_name = Column(String(128))  # 医院标签
+    longitude = Column(Float)  # 服务驻点经度
+    latitude = Column(Float)  # 服务驻点纬度
+    service_radius = Column(Integer, default=5)  # 服务半径(公里)
 
     def is_worker(self): return self.role == "worker"
     def is_elder(self): return self.role == "elder"

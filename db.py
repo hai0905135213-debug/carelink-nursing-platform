@@ -26,6 +26,9 @@ def init_db():
         # users 表
         "ALTER TABLE users ADD COLUMN hospital_proof_path VARCHAR(255)",
         "ALTER TABLE users ADD COLUMN hospital_name VARCHAR(128)",
+        "ALTER TABLE users ADD COLUMN longitude FLOAT",
+        "ALTER TABLE users ADD COLUMN latitude FLOAT",
+        "ALTER TABLE users ADD COLUMN service_radius INTEGER DEFAULT 5",
         # ratings 表
         "ALTER TABLE ratings ADD COLUMN score_attitude FLOAT",
         "ALTER TABLE ratings ADD COLUMN score_ability FLOAT",

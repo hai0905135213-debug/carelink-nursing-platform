@@ -181,6 +181,7 @@ BASE = """
       });
   });
 </script>
+	{% block scripts %}{% endblock %}
 </body></html>
 """
 
@@ -328,6 +329,116 @@ WORKER_PROFILE = """
   </div>
   <button class="btn btn-primary mt-3">保存</button>
 </form>
+
+<h5 class="mt-4 mb-3">服务驻点与半径</h5>
+<form id="locationForm" method="post" action="{{ url_for('worker_update_location') }}" class="card p-4">
+  <p class="text-secondary small">拖拽地图上的标记设定您的服务驻点，并滑动调整服务半径。</p>
+  <input type="hidden" name="longitude" id="longitude" value="{{ u.longitude or '116.397428' }}">
+  <input type="hidden" name="latitude" id="latitude" value="{{ u.latitude or '39.90923' }}">
+  <input type="hidden" name="service_radius" id="service_radius" value="{{ u.service_radius or 5 }}">
+  <div class="mb-2"><input type="text" id="searchInput" class="form-control" placeholder="输入小区、大厦或地铁站进行搜索..."></div>
+	  <div id="amapContainer" style="width:100%;height:400px;border-radius:8px;margin-bottom:12px;"></div>
+  <div class="mb-2">
+    <label class="form-label">服务半径：<strong id="radiusLabel">{{ u.service_radius or 5 }}</strong> 公里</label>
+    <input type="range" id="radiusSlider" class="form-range" min="1" max="20" value="{{ u.service_radius or 5 }}" step="1">
+  </div>
+  <div class="small text-secondary mb-2">
+    当前驻点：经度 <span id="dispLon">{{ u.longitude or '116.397428' }}</span>，纬度 <span id="dispLat">{{ u.latitude or '39.90923' }}</span>
+  </div>
+  <button type="submit" class="btn btn-success">保存驻点</button>
+</form>
+{% endblock %}
+{% block scripts %}
+<script src="https://webapi.amap.com/maps?v=2.0&key=67b5303d6e5df6b249332ca496266d44&plugin=AMap.AutoComplete,AMap.PlaceSearch"></script>
+<script>
+(function(){
+  var lonEl = document.getElementById('longitude');
+  var latEl = document.getElementById('latitude');
+  var radiusEl = document.getElementById('service_radius');
+  var slider = document.getElementById('radiusSlider');
+  var radiusLabel = document.getElementById('radiusLabel');
+  var dispLon = document.getElementById('dispLon');
+  var dispLat = document.getElementById('dispLat');
+
+  var lng = parseFloat(lonEl.value) || 116.397428;
+  var lat = parseFloat(latEl.value) || 39.90923;
+  var radius = parseFloat(radiusEl.value) || 5;
+
+  var map = new AMap.Map('amapContainer', {
+    center: [lng, lat],
+    zoom: 13,
+    resizeEnable: true
+  });
+
+  var marker = new AMap.Marker({
+    position: [lng, lat],
+    draggable: true,
+    title: '拖拽我设置驻点'
+  });
+  map.add(marker);
+
+  var circle = new AMap.Circle({
+    center: [lng, lat],
+    radius: radius * 1000,
+    fillOpacity: 0.15,
+    fillColor: '#1890ff',
+    strokeColor: '#1890ff',
+    strokeWeight: 2
+  });
+  map.add(circle);
+
+  function updateUI(pos, r) {
+    lonEl.value = pos.lng.toFixed(6);
+    latEl.value = pos.lat.toFixed(6);
+    dispLon.textContent = pos.lng.toFixed(6);
+    dispLat.textContent = pos.lat.toFixed(6);
+    marker.setPosition(pos);
+    circle.setCenter(pos);
+    circle.setRadius(r * 1000);
+    radiusEl.value = r;
+    radiusLabel.textContent = r;
+  }
+
+  marker.on('dragend', function(e) {
+    updateUI(e.target.getPosition(), parseFloat(slider.value) || 5);
+  });
+
+  slider.addEventListener('input', function(){
+    var r = parseFloat(this.value) || 5;
+    circle.setRadius(r * 1000);
+    radiusEl.value = r;
+    radiusLabel.textContent = r;
+  });
+
+  // ===== POI 搜索与自动定位 =====
+  var searchInput = document.getElementById('searchInput');
+  if (searchInput) {
+    AMap.plugin(['AMap.AutoComplete', 'AMap.PlaceSearch'], function () {
+      var auto = new AMap.AutoComplete({ input: searchInput });
+      var placeSearch = new AMap.PlaceSearch({ map: map });
+
+      auto.on('select', function (e) {
+        if (e.poi && e.poi.location) {
+          var loc = e.poi.location;
+          map.setZoomAndCenter(15, loc);
+          var r = parseFloat(slider.value) || 5;
+          updateUI({ lng: loc.lng, lat: loc.lat }, r);
+        } else {
+          placeSearch.search(searchInput.value, function (status, result) {
+            if (status === 'complete' && result.poiList && result.poiList.pois.length) {
+              var poi = result.poiList.pois[0];
+              map.setZoomAndCenter(15, [poi.location.lng, poi.location.lat]);
+              var r = parseFloat(slider.value) || 5;
+              updateUI({ lng: poi.location.lng, lat: poi.location.lat }, r);
+            }
+          });
+        }
+      });
+    });
+  }
+
+})();
+</script>
 {% endblock %}
 """
 
@@ -2516,6 +2627,42 @@ def worker_profile():
 
     return rtemplate(WORKER_PROFILE, u=current_user, skills=SKILL_CHOICES)
 
+@app.route('/worker/update_location', methods=['POST'])
+@login_required
+def worker_update_location():
+    db = db_session()
+    try:
+        u = db.get(User, current_user.id)
+        if not u or u.role != 'worker':
+            flash('只有护工可以设置服务驻点', 'warning')
+            return redirect(url_for('index'))
+
+        lon = (request.form.get('longitude') or '').strip()
+        lat = (request.form.get('latitude') or '').strip()
+        radius = (request.form.get('service_radius') or '').strip()
+
+        if lon and lat:
+            try:
+                u.longitude = float(lon)
+                u.latitude = float(lat)
+            except (ValueError, TypeError):
+                flash('经纬度格式不正确', 'warning')
+                return redirect(url_for('worker_profile'))
+
+        if radius:
+            try:
+                u.service_radius = int(float(radius))
+            except (ValueError, TypeError):
+                flash('服务半径格式不正确', 'warning')
+                return redirect(url_for('worker_profile'))
+
+        db.add(u)
+        db.commit()
+        flash('服务驻点保存成功', 'success')
+    finally:
+        db.close()
+    return redirect(url_for('worker_profile'))
+
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'uploads')
 ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg'}
 LOG_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'log_uploads')
@@ -2580,6 +2727,14 @@ def rtemplate(tpl_str=None, **ctx):
         return render_template('home.html', **ctx)
 
     body = tpl_str.replace("{% extends 'BASE' %}", "").strip()
+
+    # 提取 scripts block
+    scripts_content = ""
+    sm = re.search(r"{%\s*block\s+scripts\s*%}(.*?){%\s*endblock\s*%}", body, re.S)
+    if sm:
+        scripts_content = sm.group(1).strip()
+        body = body.replace(sm.group(0), "").strip()
+
     m = re.search(r"{%\s*block\s+content\s*%}(.*?){%\s*endblock\s*%}", body, re.S)
     if m:
       body = m.group(1).strip()
@@ -2589,6 +2744,13 @@ def rtemplate(tpl_str=None, **ctx):
       full = BASE.replace(marker, "{% block content %}\n" + body + "\n{% endblock %}")
     else:
       full = BASE + "\n" + body
+
+    if scripts_content:
+        scripts_marker = "{% block scripts %}{% endblock %}"
+        if scripts_marker in full:
+            full = full.replace(scripts_marker, "{% block scripts %}\n" + scripts_content + "\n{% endblock %}")
+        else:
+            full = full + "\n" + scripts_content
 
     return render_template_string(full, **ctx)
 

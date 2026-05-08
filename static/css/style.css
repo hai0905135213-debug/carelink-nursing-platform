@@ -423,3 +423,5 @@ footer {
 .bg-danger {
     background-color: var(--danger) !important;
 }
+/* 高德地图自动完成面板层级 */
+.amap-sug-result { z-index: 9999; }

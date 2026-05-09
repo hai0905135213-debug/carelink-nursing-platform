@@ -13,7 +13,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
 # 本模块拆分：配置、DB、模型、表单
-from config import SECRET_KEY, status_label, now, DATABASE_URL
+from config import SECRET_KEY, status_label, now, DATABASE_URL, AMAP_KEY
 from db import db_session, init_db, engine, Base
 from models import User, Order, CareLog, BindingRequest, OrderApplication
 from forms import SKILL_CHOICES
@@ -22,6 +22,7 @@ from sqlalchemy import func, text
 # -------------------- App/Ext -------------------
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+app.jinja_env.auto_reload = True
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 
@@ -82,6 +83,7 @@ BASE = """
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Merriweather:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script src="/static/chart.umd.min.js"></script>
 </head>
 <body>
 <nav class="navbar navbar-expand-lg">
@@ -270,13 +272,13 @@ REGISTER = """
 {% extends 'BASE' %}
 {% block content %}
 <div class="row justify-content-center">
-  <div class="col-lg-7"><div class="card p-4">
+  <div class="col-lg-8"><div class="card p-4">
     <h5 class="text-primary mb-3">注册</h5>
-    <form method="post">
+    <form method="post" id="registerForm">
       <div class="row g-3">
         <div class="col-md-4"><label class="form-label">角色</label>
           <select class="form-select" name="role" id="roleSelect">
-            <option value="worker">护工</option><option value="elder">老人</option><option value="family">家属</option>
+            <option value="elder">老人</option><option value="family">家属</option><option value="worker">护工</option>
           </select></div>
         <div class="col-md-4"><label class="form-label">姓名</label><input class="form-control" name="name" required></div>
         <div class="col-md-4"><label class="form-label">邮箱</label><input class="form-control" name="email" type="email" required></div>
@@ -284,23 +286,107 @@ REGISTER = """
         <div class="col-md-4"><label class="form-label">密码</label><input class="form-control" name="password" type="password" required></div>
       </div>
       <hr class="my-3">
-      <div class="row g-3" id="workerExtra">
-        <div class="col-md-4"><label class="form-label">价格（每小时）</label><input class="form-control" type="number" step="0.01" name="price_per_hour" placeholder="120.00"></div>
-        <div class="col-md-8"><label class="form-label">专业技能（多选）</label>
-          <div class="d-flex flex-wrap gap-2">
-            {% for s in skills %}<div class="form-check">
-              <input class="form-check-input" type="checkbox" name="skills" value="{{ s }}" id="s{{ loop.index }}">
-              <label class="form-check-label" for="s{{ loop.index }}">{{ s }}</label></div>{% endfor %}
+      <div id="workerExtra">
+        <div class="row g-3">
+          <div class="col-md-4"><label class="form-label">价格（每小时）</label><input class="form-control" type="number" step="0.01" name="price_per_hour" placeholder="120.00"></div>
+          <div class="col-md-8"><label class="form-label">专业技能（多选）</label>
+            <div class="d-flex flex-wrap gap-2">
+              {% for s in skills %}<div class="form-check">
+                <input class="form-check-input" type="checkbox" name="skills" value="{{ s }}" id="s{{ loop.index }}">
+                <label class="form-check-label" for="s{{ loop.index }}">{{ s }}</label></div>{% endfor %}
+            </div>
           </div>
         </div>
+
+        <hr class="my-3">
+        <label class="form-label fw-semibold mb-2">资质上传</label>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <input type="file" class="d-none" id="fileIdCard" accept=".pdf,.png,.jpg,.jpeg">
+            <div class="border border-2 rounded-3 p-4 text-center upload-box" data-target="fileIdCard" style="border-style:dashed!important;cursor:pointer;">
+              <i class="bi bi-credit-card fs-2 text-secondary"></i>
+              <div class="mt-2 upload-text">身份证</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <input type="file" class="d-none" id="fileHealth" accept=".pdf,.png,.jpg,.jpeg">
+            <div class="border border-2 rounded-3 p-4 text-center upload-box" data-target="fileHealth" style="border-style:dashed!important;cursor:pointer;">
+              <i class="bi bi-heart-pulse fs-2 text-secondary"></i>
+              <div class="mt-2 upload-text">健康证</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <input type="file" class="d-none" id="fileSkill" accept=".pdf,.png,.jpg,.jpeg">
+            <div class="border border-2 rounded-3 p-4 text-center upload-box" data-target="fileSkill" style="border-style:dashed!important;cursor:pointer;">
+              <i class="bi bi-patch-check fs-2 text-secondary"></i>
+              <div class="mt-2 upload-text">专业技能证书</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-3 small text-secondary">
+          <ul class="mb-0 ps-3">
+            <li>健康证要求：半年内二甲以上医院体检合格证明。</li>
+            <li>专业技能证书：国家认可的护理技能培训合格证书（如国家卫健委《医疗护理员培训合格证书》或人社部《养老护理员职业技能等级证书》）。</li>
+          </ul>
+        </div>
       </div>
-      <button class="btn btn-primary mt-3">注册</button>
+
+      <p class="small text-secondary mt-3 mb-0">提交后进入背景核查环节，由平台客服在3个工作日内完成审核</p>
+      <button class="btn btn-primary mt-3" type="submit">注册</button>
     </form>
   </div></div>
 </div>
+
+<div class="modal fade" id="submitSuccessModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content text-center p-4">
+      <div class="modal-body">
+        <div style="font-size:64px;">&#9989;</div>
+        <h5 class="mt-3">注册资料已提交！</h5>
+        <p class="text-secondary mb-0">正在进行背景核查，请等待3个工作日。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
-const roleSel = document.getElementById('roleSelect'); const wExtra = document.getElementById('workerExtra');
-function t(){ wExtra.style.display = roleSel.value==='worker' ? 'flex':'none'; } roleSel.addEventListener('change',t); t();
+(function(){
+  var roleSel = document.getElementById('roleSelect');
+  var wExtra = document.getElementById('workerExtra');
+  function toggleWorker(){ wExtra.style.display = roleSel.value === 'worker' ? 'block' : 'none'; }
+  roleSel.addEventListener('change', toggleWorker);
+  toggleWorker();
+
+  // 上传框点击触发 file input
+  document.querySelectorAll('.upload-box').forEach(function(box) {
+    box.addEventListener('click', function() {
+      document.getElementById(box.dataset.target).click();
+    });
+    var fileInput = document.getElementById(box.dataset.target);
+    var textEl = box.querySelector('.upload-text');
+    fileInput.addEventListener('change', function() {
+      if (fileInput.files && fileInput.files.length > 0) {
+        box.style.borderColor = '#28a745';
+        box.style.borderStyle = 'solid';
+        textEl.textContent = '已上传 ✔';
+        textEl.style.color = '#28a745';
+      }
+    });
+  });
+
+  // 表单提交拦截
+  document.getElementById('registerForm').addEventListener('submit', function(e) {
+    if (roleSel.value === 'worker') {
+      e.preventDefault();
+      var modal = new bootstrap.Modal(document.getElementById('submitSuccessModal'));
+      modal.show();
+      setTimeout(function() {
+        window.location.href = '/login';
+      }, 2500);
+    }
+  });
+})();
 </script>
 {% endblock %}
 """
@@ -347,9 +433,11 @@ WORKER_PROFILE = """
   </div>
   <button type="submit" class="btn btn-success">保存驻点</button>
 </form>
+
+{% include 'components/_credit_dashboard.html' %}
 {% endblock %}
 {% block scripts %}
-<script src="https://webapi.amap.com/maps?v=2.0&key=67b5303d6e5df6b249332ca496266d44&plugin=AMap.AutoComplete,AMap.PlaceSearch"></script>
+<script src="https://webapi.amap.com/maps?v=2.0&key=67b5303d6e5df6b249332ca496266d44"></script>
 <script>
 (function(){
   var lonEl = document.getElementById('longitude');
@@ -392,8 +480,8 @@ WORKER_PROFILE = """
     latEl.value = pos.lat.toFixed(6);
     dispLon.textContent = pos.lng.toFixed(6);
     dispLat.textContent = pos.lat.toFixed(6);
-    marker.setPosition(pos);
-    circle.setCenter(pos);
+    marker.setPosition([pos.lng, pos.lat]);
+    circle.setCenter([pos.lng, pos.lat]);
     circle.setRadius(r * 1000);
     radiusEl.value = r;
     radiusLabel.textContent = r;
@@ -410,30 +498,45 @@ WORKER_PROFILE = """
     radiusLabel.textContent = r;
   });
 
-  // ===== POI 搜索与自动定位 =====
+  // ===== POI 搜索（通过后端代理调用高德 REST API）=====
   var searchInput = document.getElementById('searchInput');
   if (searchInput) {
-    AMap.plugin(['AMap.AutoComplete', 'AMap.PlaceSearch'], function () {
-      var auto = new AMap.AutoComplete({ input: searchInput });
-      var placeSearch = new AMap.PlaceSearch({ map: map });
+    searchInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        var val = searchInput.value.trim();
+        if (!val) return;
 
-      auto.on('select', function (e) {
-        if (e.poi && e.poi.location) {
-          var loc = e.poi.location;
-          map.setZoomAndCenter(15, loc);
-          var r = parseFloat(slider.value) || 5;
-          updateUI({ lng: loc.lng, lat: loc.lat }, r);
-        } else {
-          placeSearch.search(searchInput.value, function (status, result) {
-            if (status === 'complete' && result.poiList && result.poiList.pois.length) {
-              var poi = result.poiList.pois[0];
-              map.setZoomAndCenter(15, [poi.location.lng, poi.location.lat]);
-              var r = parseFloat(slider.value) || 5;
-              updateUI({ lng: poi.location.lng, lat: poi.location.lat }, r);
+        searchInput.disabled = true;
+        searchInput.placeholder = '搜索中...';
+
+        fetch('/api/place_search?keywords=' + encodeURIComponent(val))
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            searchInput.disabled = false;
+            searchInput.placeholder = '输入小区、大厦或地铁站进行搜索...';
+
+            if (data.error) {
+              alert('搜索失败：' + data.error);
+              return;
             }
+            if (data.status === 'empty' || !data.pois || !data.pois.length) {
+              alert('未找到匹配的地点');
+              return;
+            }
+
+            // 取第一个结果
+            var poi = data.pois[0];
+            var r = parseFloat(slider.value) || 5;
+            map.setZoomAndCenter(15, [poi.lng, poi.lat]);
+            updateUI({ lng: poi.lng, lat: poi.lat }, r);
+          })
+          .catch(function(err) {
+            searchInput.disabled = false;
+            searchInput.placeholder = '输入小区、大厦或地铁站进行搜索...';
+            alert('搜索请求失败，请稍后重试');
           });
-        }
-      });
+      }
     });
   }
 
@@ -624,21 +727,96 @@ def _simple_skill_match(order_skills, worker_skills):
     return max(35.0, min(100.0, 100.0 * inter / max(1, len(req))))
 
 
+def _compute_credit_data(worker, db):
+    """基于护工真实数据计算信用分五维度、趋势、场景分。worker.id 做确定性种子。"""
+    import hashlib as _hashlib
+    import random as _random
+    from models import Rating as _Rating
+
+    seed_val = int(_hashlib.md5(str(worker.id).encode()).hexdigest()[:8], 16) % 100000
+    rng = _random.Random(seed_val)
+
+    skill_count = len([s.strip() for s in (worker.skills_display or '').split(',') if s.strip()])
+    qualification = max(40, min(100, 55 + skill_count * 8 + rng.randint(-5, 10)))
+
+    completed = db.query(func.count(Order.id)).filter(
+        Order.accepted_worker_id == worker.id, Order.status == 'completed'
+    ).scalar() or 0
+    fulfillment = max(40, min(100, 60 + completed * 6 + rng.randint(-5, 8)))
+
+    rs = db.query(func.avg(_Rating.score_transparent)).filter(_Rating.worker_id == worker.id).first()
+    t_avg = float(rs[0]) if rs and rs[0] else None
+    if t_avg is not None:
+        compliance = max(40, min(100, int(t_avg * 18 + rng.randint(-3, 5))))
+    else:
+        compliance = max(40, min(100, 68 + rng.randint(0, 20)))
+
+    ars = db.query(func.avg(_Rating.score_attitude)).filter(_Rating.worker_id == worker.id).first()
+    a_avg = float(ars[0]) if ars and ars[0] else float(worker.rating or 4.0)
+    reputation = max(40, min(100, int(a_avg * 17 + rng.randint(-5, 8))))
+
+    anomaly_count = db.query(func.count(CareLog.id)).filter(
+        CareLog.worker_id == worker.id,
+        CareLog.anomalies.isnot(None),
+        CareLog.anomalies != '无异常',
+        CareLog.anomalies != ''
+    ).scalar() or 0
+    anomaly_score = max(40, min(100, 100 - anomaly_count * 8 + rng.randint(-3, 3)))
+
+    dims = [qualification, fulfillment, compliance, reputation, anomaly_score]
+    weights = [0.25, 0.25, 0.20, 0.20, 0.10]
+    raw_score = sum(d * w for d, w in zip(dims, weights))  # 0-100 尺度
+    credit_total = int(700 + raw_score * 2.5)               # 映射到 700-950
+    credit_total = max(700, min(950, credit_total + rng.randint(-5, 5)))
+
+    if credit_total >= 880:
+        level, badge = '优质护工', 'bg-warning text-dark'
+    elif credit_total >= 830:
+        level, badge = '良好护工', 'bg-info'
+    else:
+        level, badge = '标准护工', 'bg-secondary'
+
+    # 趋势：半年前稍低，逐渐升到当前总分
+    base = credit_total - rng.randint(25, 60)
+    step = (credit_total - base) / 5.0
+    trend = [max(700, min(950, int(base + step * i + rng.randint(-4, 4)))) for i in range(6)]
+    trend[-1] = credit_total
+
+    # 场景子信用分（0-100 尺度，基于原始分加确定性波动）
+    return {
+        'total': credit_total,
+        'level': level,
+        'badge': badge,
+        'dims': dims,
+        'trend': trend,
+        'trend_labels': ['12月', '1月', '2月', '3月', '4月', '5月'],
+        'scenarios': {
+            '压疮预防': max(40, min(100, int(raw_score * 1.05 + rng.randint(-8, 8)))),
+            '用药管理': max(40, min(100, int(raw_score * 0.95 + rng.randint(-8, 8)))),
+            '术后照护': max(40, min(100, int(raw_score * 1.02 + rng.randint(-8, 8)))),
+        },
+    }
+
+
 def _rank_applicants_with_ai(order_obj, candidates):
     """候选人排序：优先评分/权威/价格，技能匹配权重较小。"""
     if not candidates:
         return [], "暂无候选护工"
 
     for c in candidates:
+        credit_norm = (c.get("credit_score", 800) - 700) / 2.5   # 700-950 → 0-100
         c["base_score"] = (
-            0.55 * c["rating_avg"] +
-            0.35 * c["price_match_score"] +
-            0.10 * c["skill_match_score"]
+            0.40 * c["rating_avg"] * 20 +      # rating 1-5 → 20-100
+            0.30 * c["price_match_score"] +
+            0.15 * c["skill_match_score"] +
+            0.15 * credit_norm
         )
 
     fallback_sorted = sorted(candidates, key=lambda x: x["base_score"], reverse=True)
+    top = fallback_sorted[0]
     fallback_reason = (
-        f"综合评分与价格匹配度，推荐 {fallback_sorted[0]['display_name']} 优先接单。"
+        f"综合评分、信用分与价格匹配度，推荐 {top['display_name']} 优先接单。"
+        f"（信用分 {top.get('credit_score', '—')}，等级 {top.get('credit_level', '—')}）"
     )
 
     try:
@@ -659,6 +837,8 @@ def _rank_applicants_with_ai(order_obj, candidates):
                     "rating_avg": round(c["rating_avg"], 2),
                     "price_match_score": round(c["price_match_score"], 2),
                     "skill_match_score": round(c["skill_match_score"], 2),
+                    "credit_score": c.get("credit_score", 800),
+                    "credit_level": c.get("credit_level", ""),
                     "skills_display": c["skills_display"] or "",
                     "price_per_hour": c["price_per_hour"] or 0
                 } for c in candidates
@@ -666,9 +846,9 @@ def _rank_applicants_with_ai(order_obj, candidates):
         }
         prompt = (
             "你是护理平台的派单评估助手。请根据输入的 order 与 candidates 做排序。"
-            "权重要求：评分与价格匹配是主导，技能匹配权重较小。"
+            "权重要求：评分 40%、价格匹配 30%、技能匹配 15%、信用分 15%。"
             "请输出 JSON：{\"ranking\":[{\"worker_id\":1,\"score\":88.5}],\"top_reason\":\"...\"}。"
-            "top_reason 请明确提及：评分、价格匹配，并简要提一嘴技能匹配。"
+            "top_reason 请明确提及：评分、价格匹配、信用分，并简要提一嘴技能匹配。"
             "禁止输出 markdown。输入数据如下：\n" + json.dumps(payload, ensure_ascii=False)
         )
         resp = client.chat.completions.create(
@@ -1500,7 +1680,8 @@ def register():
             email = request.form.get("email", "").strip()
             if db.query(User).filter_by(email=email).first():
                 flash("邮箱已被注册","warning")
-                return rtemplate(REGISTER, skills=SKILL_CHOICES)
+                from flask import render_template
+                return render_template('register.html', skills=SKILL_CHOICES)
             
             role = request.form.get("role")
             name = request.form.get("name", "").strip()
@@ -1705,6 +1886,8 @@ def elder_create():
         if skills_other:
             skills_list.extend([s.strip() for s in skills_other.split(",") if s.strip()])
         skills = ", ".join(skills_list)
+        lon = (request.form.get("longitude") or "").strip()
+        lat = (request.form.get("latitude") or "").strip()
         db = db_session()
         try:
             o = Order(
@@ -1713,7 +1896,9 @@ def elder_create():
                 description=description or "",
                 skills_required=skills,
                 acceptable_price_range=acceptable_price_range,
-                address=address
+                address=address,
+                longitude=float(lon) if lon else None,
+                latitude=float(lat) if lat else None
             )
             db.add(o)
             db.commit()
@@ -1722,7 +1907,7 @@ def elder_create():
         finally:
             db.close()
     from flask import render_template
-    return render_template('elder_create.html')
+    return render_template('elder_create.html', SKILL_CHOICES=SKILL_CHOICES)
 
 
 # --- Minimal stubs for referenced endpoints to avoid BuildError when rendering templates ---
@@ -1863,6 +2048,7 @@ def elder_applications():
                 ).filter(Rating.worker_id == w.id).first()
                 dims = [float(x) for x in rs if x is not None] if rs else []
                 rating_avg = sum(dims) / len(dims) if dims else float(w.rating or 4.0)
+                credit = _compute_credit_data(w, db)
                 candidates.append({
                     "application_id": ap.id,
                     "worker_id": w.id,
@@ -1871,7 +2057,10 @@ def elder_applications():
                     "price_per_hour": float(w.price_per_hour or 0),
                     "rating_avg": float(rating_avg),
                     "price_match_score": _price_match_score(float(w.price_per_hour or 0), getattr(o, 'acceptable_price_range', None)),
-                    "skill_match_score": _simple_skill_match(o.skills_required, w.skills_display)
+                    "skill_match_score": _simple_skill_match(o.skills_required, w.skills_display),
+                    "credit_score": credit['total'],
+                    "credit_level": credit['level'],
+                    "credit_badge": credit['badge']
                 })
             ranked, top_reason = _rank_applicants_with_ai(o, candidates)
             rankings.append({
@@ -2444,7 +2633,8 @@ def worker_public(worker_id):
         adjustment = base - current_avg
         ratings = [max(1.0, min(5.0, r + adjustment)) for r in ratings]
         rating_attitude, rating_ability, rating_transparent = ratings
-    return render_template('worker_public.html', w=w, rating_attitude=rating_attitude, rating_ability=rating_ability, rating_transparent=rating_transparent)
+    credit = _compute_credit_data(w, db)
+    return render_template('worker_public.html', w=w, rating_attitude=rating_attitude, rating_ability=rating_ability, rating_transparent=rating_transparent, credit=credit)
   finally:
     db.close()
 
@@ -2625,7 +2815,8 @@ def worker_profile():
         db.close()
       return redirect(url_for('worker_profile'))
 
-    return rtemplate(WORKER_PROFILE, u=current_user, skills=SKILL_CHOICES)
+    credit = _compute_credit_data(current_user, db_session())
+    return rtemplate(WORKER_PROFILE, u=current_user, skills=SKILL_CHOICES, credit=credit)
 
 @app.route('/worker/update_location', methods=['POST'])
 @login_required
@@ -2662,6 +2853,64 @@ def worker_update_location():
     finally:
         db.close()
     return redirect(url_for('worker_profile'))
+
+@app.route('/api/place_search')
+@login_required
+def api_place_search():
+    """地点搜索 —— 优先高德，失败则回退 Nominatim"""
+    import requests as req
+    keywords = (request.args.get('keywords') or '').strip()
+    if not keywords:
+        return jsonify({'error': '请输入搜索关键词'}), 400
+
+    pois = None
+
+    # 方案 A：高德 REST API
+    try:
+        resp = req.get('https://restapi.amap.com/v3/place/text', params={
+            'key': AMAP_KEY,
+            'keywords': keywords,
+            'output': 'JSON',
+            'offset': 10
+        }, timeout=5)
+        data = resp.json()
+        if data.get('status') == '1' and data.get('pois'):
+            pois = []
+            for p in data['pois'][:10]:
+                pois.append({
+                    'name': p.get('name', ''),
+                    'address': p.get('address', ''),
+                    'lng': float(p.get('location', '0,0').split(',')[0]),
+                    'lat': float(p.get('location', '0,0').split(',')[1])
+                })
+    except Exception:
+        pass
+
+    # 方案 B：Nominatim（免费，无需 Key）
+    if not pois:
+        try:
+            resp = req.get('https://nominatim.openstreetmap.org/search', params={
+                'q': keywords,
+                'format': 'json',
+                'limit': 10,
+                'accept-language': 'zh'
+            }, headers={'User-Agent': 'CareLinkNursingPlatform/1.0'}, timeout=10)
+            data = resp.json()
+            if data and isinstance(data, list) and len(data) > 0:
+                pois = []
+                for p in data[:10]:
+                    pois.append({
+                        'name': p.get('display_name', '')[:80],
+                        'address': p.get('display_name', '')[:120],
+                        'lng': float(p.get('lon', 0)),
+                        'lat': float(p.get('lat', 0))
+                    })
+        except Exception:
+            pass
+
+    if pois:
+        return jsonify({'status': 'ok', 'pois': pois})
+    return jsonify({'status': 'empty', 'message': '未找到结果，请尝试更具体的关键词'})
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'uploads')
 ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg'}

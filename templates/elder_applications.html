@@ -32,6 +32,7 @@
             <th>评分均值</th>
             <th>价格匹配</th>
             <th>技能匹配</th>
+            <th>信用评价</th>
             <th></th>
           </tr>
         </thead>
@@ -53,6 +54,10 @@
             <td>{{ '%.2f'|format(c.rating_avg or 0) }}</td>
             <td>{{ '%.1f'|format(c.price_match_score or 0) }}</td>
             <td>{{ '%.1f'|format(c.skill_match_score or 0) }}</td>
+            <td>
+              <span class="fw-semibold">{{ c.credit_score }}</span>
+              <span class="badge {{ c.credit_badge }} ms-1" style="font-size:0.7rem;">{{ c.credit_level }}</span>
+            </td>
             <td class="text-end">
               <form method="post" action="{{ url_for('elder_accept_applicant', order_id=item.order.id, worker_id=c.worker_id) }}">
                 <button class="btn btn-sm btn-primary">录用</button>

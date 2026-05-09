@@ -37,6 +37,8 @@ class Order(Base):
     skills_required = Column(String(255))
     acceptable_price_range = Column(String(32))  # 可接受价格区间（元/小时）
     address = Column(String(255))  # 订单地址
+    longitude = Column(Float)  # 订单地址经度
+    latitude = Column(Float)  # 订单地址纬度
     status = Column(String(16), default="open")  # open/accepted/in_progress/completed/handover
     created_at = Column(DateTime, default=datetime.utcnow)
     accepted_worker_id = Column(Integer, ForeignKey("users.id"))

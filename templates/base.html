@@ -11,6 +11,7 @@
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Merriweather:wght@400;700&display=swap"
     rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="/static/chart.umd.min.js"></script>
 </head>
 
 <body>
@@ -81,7 +82,6 @@
     © {{ now.year }} 护理智联 · 共享护理日志 · 任务接手 · 可视化 · 护工信息透明化
   </footer>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script>
     document.addEventListener('click', function (e) {
       const btn = e.target.closest('.js-order-brief-btn');

@@ -1,31 +1,68 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="row justify-content-center">
-  <div class="col-lg-7"><div class="card p-4">
+  <div class="col-lg-8"><div class="card p-4">
     <h5 class="text-primary mb-3">注册</h5>
-    <form method="post">
+    <form method="post" id="registerForm">
       <div class="row g-3">
         <div class="col-md-4"><label class="form-label">角色</label>
           <select class="form-select" name="role" id="roleSelect">
-            <option value="worker">护工</option><option value="elder">老人</option><option value="family">家属</option>
+            <option value="elder">老人</option><option value="family">家属</option><option value="worker">护工</option>
           </select></div>
-        <div class="col-md-4"><label class="form-label">姓氏</label><input class="form-control" name="name" placeholder="如：黄、李" required></div>
+        <div class="col-md-4"><label class="form-label">姓名</label><input class="form-control" name="name" required></div>
         <div class="col-md-4"><label class="form-label">邮箱</label><input class="form-control" name="email" type="email" required></div>
         <div class="col-md-4"><label class="form-label">电话</label><input class="form-control" name="phone"></div>
         <div class="col-md-4"><label class="form-label">密码</label><input class="form-control" name="password" type="password" required></div>
       </div>
       <hr class="my-3">
-      <div class="row g-3" id="workerExtra">
-        <div class="col-md-4"><label class="form-label">价格（每小时）</label><input class="form-control" type="number" step="0.01" name="price_per_hour" placeholder="120.00"></div>
-        <div class="col-md-8"><label class="form-label">专业技能（多选）</label>
-          <div class="d-flex flex-wrap gap-2">
-            {% for s in skills %}<div class="form-check">
-              <input class="form-check-input" type="checkbox" name="skills" value="{{ s }}" id="s{{ loop.index }}">
-              <label class="form-check-label" for="s{{ loop.index }}">{{ s }}</label></div>{% endfor %}
+      <div id="workerExtra">
+        <div class="row g-3">
+          <div class="col-md-4"><label class="form-label">价格（每小时）</label><input class="form-control" type="number" step="0.01" name="price_per_hour" placeholder="120.00"></div>
+          <div class="col-md-8"><label class="form-label">专业技能（多选）</label>
+            <div class="d-flex flex-wrap gap-2">
+              {% for s in skills %}<div class="form-check">
+                <input class="form-check-input" type="checkbox" name="skills" value="{{ s }}" id="s{{ loop.index }}">
+                <label class="form-check-label" for="s{{ loop.index }}">{{ s }}</label></div>{% endfor %}
+            </div>
           </div>
         </div>
+
+        <hr class="my-3">
+        <label class="form-label fw-semibold mb-2">资质上传</label>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <input type="file" class="d-none" id="fileIdCard" accept=".pdf,.png,.jpg,.jpeg">
+            <div class="border border-2 rounded-3 p-4 text-center upload-box" data-target="fileIdCard" style="border-style:dashed!important;cursor:pointer;">
+              <i class="bi bi-credit-card fs-2 text-secondary"></i>
+              <div class="mt-2 upload-text">身份证</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <input type="file" class="d-none" id="fileHealth" accept=".pdf,.png,.jpg,.jpeg">
+            <div class="border border-2 rounded-3 p-4 text-center upload-box" data-target="fileHealth" style="border-style:dashed!important;cursor:pointer;">
+              <i class="bi bi-heart-pulse fs-2 text-secondary"></i>
+              <div class="mt-2 upload-text">健康证</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <input type="file" class="d-none" id="fileSkill" accept=".pdf,.png,.jpg,.jpeg">
+            <div class="border border-2 rounded-3 p-4 text-center upload-box" data-target="fileSkill" style="border-style:dashed!important;cursor:pointer;">
+              <i class="bi bi-patch-check fs-2 text-secondary"></i>
+              <div class="mt-2 upload-text">专业技能证书</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-3 small text-secondary">
+          <ul class="mb-0 ps-3">
+            <li>健康证要求：半年内二甲以上医院体检合格证明。</li>
+            <li>专业技能证书：国家认可的护理技能培训合格证书（如国家卫健委《医疗护理员培训合格证书》或人社部《养老护理员职业技能等级证书》）。</li>
+          </ul>
+        </div>
       </div>
-      <button class="btn btn-primary mt-3">注册</button>
+
+      <p class="small text-secondary mt-3 mb-0">提交后进入背景核查环节，由平台客服在3个工作日内完成审核</p>
+      <button class="btn btn-primary mt-3" type="submit">注册</button>
     </form>
     <hr class="my-4">
     <div class="d-flex justify-content-between align-items-center">
@@ -34,8 +71,55 @@
     </div>
   </div></div>
 </div>
+
+<div class="modal fade" id="submitSuccessModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content text-center p-4">
+      <div class="modal-body">
+        <div style="font-size:64px;">✅</div>
+        <h5 class="mt-3">注册资料已提交！</h5>
+        <p class="text-secondary mb-0">正在进行背景核查，请等待3个工作日。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
-const roleSel = document.getElementById('roleSelect'); const wExtra = document.getElementById('workerExtra');
-function t(){ wExtra.style.display = roleSel.value==='worker' ? 'flex':'none'; } roleSel.addEventListener('change',t); t();
+(function(){
+  var roleSel = document.getElementById('roleSelect');
+  var wExtra = document.getElementById('workerExtra');
+  function toggleWorker(){ wExtra.style.display = roleSel.value === 'worker' ? 'block' : 'none'; }
+  roleSel.addEventListener('change', toggleWorker);
+  toggleWorker();
+
+  // 上传框点击触发 file input + 已上传反馈
+  document.querySelectorAll('.upload-box').forEach(function(box) {
+    box.addEventListener('click', function() {
+      document.getElementById(box.dataset.target).click();
+    });
+    var fileInput = document.getElementById(box.dataset.target);
+    var textEl = box.querySelector('.upload-text');
+    fileInput.addEventListener('change', function() {
+      if (fileInput.files && fileInput.files.length > 0) {
+        box.style.borderColor = '#28a745';
+        box.style.borderStyle = 'solid';
+        textEl.textContent = '已上传 ✔';
+        textEl.style.color = '#28a745';
+      }
+    });
+  });
+
+  // 护工注册：拦截提交，弹出成功弹窗
+  document.getElementById('registerForm').addEventListener('submit', function(e) {
+    if (roleSel.value === 'worker') {
+      e.preventDefault();
+      var modal = new bootstrap.Modal(document.getElementById('submitSuccessModal'));
+      modal.show();
+      setTimeout(function() {
+        window.location.href = '/login';
+      }, 2500);
+    }
+  });
+})();
 </script>
 {% endblock %}

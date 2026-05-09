@@ -4,7 +4,7 @@
   <div class="col-md-8">
     <div class="card p-4">
       <h5 class="mb-3">发布护理订单</h5>
-      <form method="post">
+      <form method="post" id="createForm">
         <div class="mb-3"><label class="form-label">标题</label><input class="form-control" name="title" required></div>
         <div class="mb-3"><label class="form-label">需求描述</label><textarea class="form-control" name="description"
             rows="4" required></textarea></div>
@@ -22,8 +22,21 @@
         </div>
         <div class="mb-3">
           <label class="form-label">护理地址</label>
-          <input class="form-control" name="address" placeholder="填写详细地址（如：北京市海淀区XXX路XX号）" required>
+          <input class="form-control" name="address" id="addressInput" placeholder="填写详细地址（如：北京市海淀区XXX路XX号）" required>
         </div>
+
+        <hr class="my-3">
+        <label class="form-label fw-semibold">在地图上定位</label>
+        <p class="text-secondary small">在地图上搜索或拖拽标记来定位护理地址，帮助护工找到你</p>
+        <input type="hidden" name="longitude" id="longitude">
+        <input type="hidden" name="latitude" id="latitude">
+        <div class="mb-2"><input type="text" id="searchInput" class="form-control" placeholder="输入小区、大厦或地铁站进行搜索，按回车查找..."></div>
+        <div id="amapContainer" style="width:100%;height:360px;border-radius:8px;margin-bottom:8px;"></div>
+        <div class="small text-secondary">
+          当前定位：经度 <span id="dispLon">-</span>，纬度 <span id="dispLat">-</span>
+        </div>
+
+        <hr class="my-3">
         <div class="mb-3">
           <label class="form-label">所需技能（可多选）</label>
           <div class="d-flex flex-wrap gap-2">
@@ -48,9 +61,93 @@
             </label>
           </div>
         </div>
-        <button class="btn btn-primary">发布</button>
+        <button class="btn btn-primary" type="submit">发布</button>
       </form>
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://webapi.amap.com/maps?v=2.0&key=67b5303d6e5df6b249332ca496266d44"></script>
+<script>
+(function(){
+  var lonEl = document.getElementById('longitude');
+  var latEl = document.getElementById('latitude');
+  var dispLon = document.getElementById('dispLon');
+  var dispLat = document.getElementById('dispLat');
+  var addressInput = document.getElementById('addressInput');
+
+  var defaultLng = 116.397428;
+  var defaultLat = 39.90923;
+
+  var map = new AMap.Map('amapContainer', {
+    center: [defaultLng, defaultLat],
+    zoom: 13,
+    resizeEnable: true
+  });
+
+  var marker = new AMap.Marker({
+    position: [defaultLng, defaultLat],
+    draggable: true,
+    title: '拖拽我设置护理地址'
+  });
+  map.add(marker);
+
+  function updateUI(pos) {
+    lonEl.value = pos.lng.toFixed(6);
+    latEl.value = pos.lat.toFixed(6);
+    dispLon.textContent = pos.lng.toFixed(6);
+    dispLat.textContent = pos.lat.toFixed(6);
+    marker.setPosition([pos.lng, pos.lat]);
+    map.setCenter([pos.lng, pos.lat]);
+  }
+
+  marker.on('dragend', function(e) {
+    updateUI(e.target.getPosition());
+  });
+
+  // 地图点击也能设点
+  map.on('click', function(e) {
+    updateUI(e.lnglat);
+  });
+
+  // ===== 搜索：复用后端代理 API =====
+  var searchInput = document.getElementById('searchInput');
+  if (searchInput) {
+    searchInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        var val = searchInput.value.trim();
+        if (!val) return;
+
+        searchInput.disabled = true;
+        searchInput.placeholder = '搜索中...';
+
+        fetch('/api/place_search?keywords=' + encodeURIComponent(val))
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            searchInput.disabled = false;
+            searchInput.placeholder = '输入小区、大厦或地铁站进行搜索，按回车查找...';
+
+            if (data.status !== 'ok' || !data.pois || !data.pois.length) {
+              alert('未找到匹配的地点，请尝试更具体的关键词');
+              return;
+            }
+
+            var poi = data.pois[0];
+            updateUI({ lng: poi.lng, lat: poi.lat });
+            // 自动填充地址
+            addressInput.value = poi.address || poi.name;
+          })
+          .catch(function() {
+            searchInput.disabled = false;
+            searchInput.placeholder = '输入小区、大厦或地铁站进行搜索，按回车查找...';
+            alert('搜索请求失败，请稍后重试');
+          });
+      }
+    });
+  }
+})();
+</script>
 {% endblock %}

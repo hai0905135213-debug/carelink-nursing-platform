@@ -15,6 +15,7 @@ def status_label(s):
 # 数据库与密钥配置：优先从环境变量读取
 DATABASE_URL = os.environ.get("DATABASE_URL") or "sqlite:///carelink.dev.db"
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change")
+AMAP_KEY = os.environ.get("AMAP_KEY", "67b5303d6e5df6b249332ca496266d44")
 
 def now():
     return datetime.utcnow()

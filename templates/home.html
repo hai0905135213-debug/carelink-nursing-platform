@@ -25,6 +25,18 @@
   </div>
 </div>
 
+<!-- 护工招募横幅 -->
+<div class="alert border-0 mb-5 d-flex align-items-center justify-content-between flex-wrap gap-3"
+     style="background: linear-gradient(135deg, #1a3a5c 0%, #2c6faa 100%); color: #fff; border-radius: 12px; padding: 1.5rem 2rem;">
+  <div>
+    <div class="fw-bold fs-5 mb-1">护工招募：自主定价，0 中介费，你的信用就是你的资产</div>
+    <div class="opacity-75">入驻即享商业保险、免费培训、信用成长体系。</div>
+  </div>
+  <a href="{{ url_for('worker_benefits') }}" class="btn btn-light btn-lg px-4 fw-semibold text-primary" style="white-space: nowrap;">
+    查看护工福利与待遇 <i class="bi bi-arrow-right ms-1"></i>
+  </a>
+</div>
+
 <!-- 信任条 -->
 <style>
   .stat-mini-custom {
@@ -75,6 +87,113 @@
         <div class="value">5,678</div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- 金刚区快捷导航 -->
+<style>
+  .quick-nav-wrapper {
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+      padding: 24px 16px;
+      margin-top: 0;
+      margin-bottom: 36px;
+      border: 1px solid rgba(0,0,0,0.03);
+  }
+  .quick-nav-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 20px 12px;
+      text-align: center;
+  }
+  @media (max-width: 768px) {
+      .quick-nav-grid {
+          grid-template-columns: repeat(5, 1fr);
+          gap: 16px 4px;
+      }
+  }
+  .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-decoration: none;
+      color: #333;
+      cursor: pointer;
+      transition: all 0.2s ease;
+  }
+  .nav-item:hover {
+      transform: translateY(-3px);
+  }
+  .nav-item:hover .nav-icon-wrapper {
+      box-shadow: 0 6px 12px rgba(29, 158, 117, 0.15);
+  }
+  .nav-icon-wrapper {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background-color: #F8F9FA;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 10px;
+      overflow: hidden;
+      transition: all 0.3s ease;
+  }
+  .nav-icon-wrapper img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+  }
+  .nav-text {
+      font-size: 15px;
+      font-weight: 600;
+      white-space: nowrap;
+  }
+</style>
+
+<div class="quick-nav-wrapper">
+  <div class="quick-nav-grid">
+      <a href="#" class="nav-item">
+          <div class="nav-icon-wrapper"><img src="{{ url_for('static', filename='images/nav/nav_stroke.jpg') }}" alt="脑卒中康复"></div>
+          <span class="nav-text">脑卒中康复</span>
+      </a>
+      <a href="#" class="nav-item">
+          <div class="nav-icon-wrapper"><img src="{{ url_for('static', filename='images/nav/nav_escort.jpg') }}" alt="陪诊服务"></div>
+          <span class="nav-text">陪诊服务</span>
+      </a>
+      <a href="#" class="nav-item">
+          <div class="nav-icon-wrapper"><img src="{{ url_for('static', filename='images/nav/nav_fracture.jpg') }}" alt="骨折康复"></div>
+          <span class="nav-text">骨折康复</span>
+      </a>
+      <a href="#" class="nav-item">
+          <div class="nav-icon-wrapper"><img src="{{ url_for('static', filename='images/nav/nav_bedsore.jpg') }}" alt="压疮护理"></div>
+          <span class="nav-text">压疮护理</span>
+      </a>
+      <a href="#" class="nav-item">
+          <div class="nav-icon-wrapper"><img src="{{ url_for('static', filename='images/nav/nav_wheelchair.jpg') }}" alt="爆款轮椅"></div>
+          <span class="nav-text">爆款轮椅</span>
+      </a>
+      <a href="#" class="nav-item">
+          <div class="nav-icon-wrapper"><img src="{{ url_for('static', filename='images/nav/nav_diaper.jpg') }}" alt="纸尿裤"></div>
+          <span class="nav-text">纸尿裤</span>
+      </a>
+      <a href="#" class="nav-item">
+          <div class="nav-icon-wrapper"><img src="{{ url_for('static', filename='images/nav/nav_shoes.jpg') }}" alt="适老鞋"></div>
+          <span class="nav-text">适老鞋</span>
+      </a>
+      <a href="#" class="nav-item">
+          <div class="nav-icon-wrapper"><img src="{{ url_for('static', filename='images/nav/nav_meal.jpg') }}" alt="助餐服务"></div>
+          <span class="nav-text">助餐服务</span>
+      </a>
+      <a href="#" class="nav-item">
+          <div class="nav-icon-wrapper"><img src="{{ url_for('static', filename='images/nav/nav_bed.jpg') }}" alt="智慧家床"></div>
+          <span class="nav-text">智慧家床</span>
+      </a>
+      <a href="#" class="nav-item">
+          <div class="nav-icon-wrapper" style="background:#E1F5EE; color:#0F6E56;"><i class="bi bi-grid-3x3-gap-fill" style="font-size: 26px;"></i></div>
+          <span class="nav-text">全部服务</span>
+      </a>
   </div>
 </div>
 

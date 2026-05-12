@@ -88,7 +88,7 @@ BASE = """
 <body>
 <nav class="navbar navbar-expand-lg">
   <div class="container">
-    <a class="navbar-brand fw-semibold text-primary" href="{{ url_for('index') }}">护理智联</a>
+    <a class="navbar-brand fw-semibold" href="{{ url_for('index') }}"><img src="{{ url_for('static', filename='logo.jpg') }}" height="36" class="me-2" alt="logo">护理智联</a>
     <button class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#nav"><span class="navbar-toggler-icon"></span></button>
     <div id="nav" class="collapse navbar-collapse">
       <ul class="navbar-nav me-auto">
@@ -1445,6 +1445,10 @@ def api_elder_durations(elder_id):
 
 
 # -------------------- Routes: common ------------
+@app.route('/worker_benefits')
+def worker_benefits():
+    return render_template('worker_benefits.html')
+
 @app.route("/")
 def index():
     db = db_session()

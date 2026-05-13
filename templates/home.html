@@ -197,6 +197,62 @@
   </div>
 </div>
 
+<!-- 平台优势轮播图 -->
+<style>
+  .feature-carousel-wrapper {
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+      margin-top: 24px;
+      margin-bottom: 24px;
+      background-color: #fff;
+  }
+  .feature-carousel-wrapper .carousel-item img {
+      width: 100%;
+      object-fit: cover;
+      transition: transform 0.3s ease;
+  }
+  .feature-carousel-wrapper .carousel-item:hover img {
+      transform: scale(1.01);
+  }
+  .carousel-indicators [data-bs-target] {
+      background-color: #1D9E75;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin: 0 6px;
+  }
+</style>
+
+<div class="feature-carousel-wrapper">
+  <div id="coreFeatureCarousel" class="carousel slide" data-bs-ride="carousel" data-bs-interval="4000">
+    <div class="carousel-indicators">
+      <button type="button" data-bs-target="#coreFeatureCarousel" data-bs-slide-to="0" class="active" aria-current="true" aria-label="Slide 1"></button>
+      <button type="button" data-bs-target="#coreFeatureCarousel" data-bs-slide-to="1" aria-label="Slide 2"></button>
+      <button type="button" data-bs-target="#coreFeatureCarousel" data-bs-slide-to="2" aria-label="Slide 3"></button>
+    </div>
+    <div class="carousel-inner">
+      <div class="carousel-item active">
+        <img src="{{ url_for('static', filename='images/banner_1.jpg') }}" class="d-block w-100" alt="让每一次照护都有记录有保障">
+      </div>
+      <div class="carousel-item">
+        <img src="{{ url_for('static', filename='images/banner_2.jpg') }}" class="d-block w-100" alt="子女不在身边也能安心养老">
+      </div>
+      <div class="carousel-item">
+        <img src="{{ url_for('static', filename='images/banner_3.jpg') }}" class="d-block w-100" alt="科技赋能让照护更专业">
+      </div>
+    </div>
+    <button class="carousel-control-prev" type="button" data-bs-target="#coreFeatureCarousel" data-bs-slide="prev">
+      <span class="carousel-control-prev-icon" aria-hidden="true" style="filter: invert(100%);"></span>
+      <span class="visually-hidden">上一张</span>
+    </button>
+    <button class="carousel-control-next" type="button" data-bs-target="#coreFeatureCarousel" data-bs-slide="next">
+      <span class="carousel-control-next-icon" aria-hidden="true" style="filter: invert(100%);"></span>
+      <span class="visually-hidden">下一张</span>
+    </button>
+  </div>
+</div>
+
 <div class="row g-4 mb-5">
   <div class="col-md-4">
     <div class="card feature h-100">

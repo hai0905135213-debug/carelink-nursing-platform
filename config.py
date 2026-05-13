@@ -13,7 +13,8 @@ def status_label(s):
   return STATUS_MAP.get(s, s)
 
 # 数据库与密钥配置：优先从环境变量读取
-DATABASE_URL = os.environ.get("DATABASE_URL") or "sqlite:///carelink.dev.db"
+_basedir = os.path.abspath(os.path.dirname(__file__))
+DATABASE_URL = os.environ.get("DATABASE_URL") or f"sqlite:///{os.path.join(_basedir, 'carelink.dev.db')}"
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change")
 AMAP_KEY = os.environ.get("AMAP_KEY", "67b5303d6e5df6b249332ca496266d44")
 
